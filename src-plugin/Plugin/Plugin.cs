@@ -374,7 +374,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private HookResult OnPlayerSpawn(EventPlayerSpawn ev)
 	{
 		var player = ev.UserIdPlayer;
-		if (!player.IsValid)
+		if (player is null || !player.IsValid)
 			return HookResult.Continue;
 
 		var arenaPlayer = _playerManager.GetPlayer(player);
@@ -423,7 +423,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		ev.DontBroadcast = true;
 
 		var player = ev.UserIdPlayer;
-		if (!player.IsValid)
+		if (player is null || !player.IsValid)
 			return HookResult.Continue;
 
 		var arenaPlayer = _playerManager.GetPlayer(player);
@@ -493,7 +493,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		var attacker = ev.Accessor.GetPlayer("attacker");
 		var victim = ev.UserIdPlayer;
 
-		if (!attacker.IsValid || !victim.IsValid)
+		if (attacker is null || !attacker.IsValid || victim is null || !victim.IsValid)
 			return HookResult.Continue;
 
 		var attackerArena = _playerManager.GetPlayer(attacker)?.CurrentArena;
@@ -505,8 +505,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			var pawn = ev.UserIdPawn;
 			if (pawn.IsValid)
 			{
-				pawn.Health += ev.DmgHealth;
-				pawn.ArmorValue += ev.DmgArmor;
+				pawn.Health += ev.ActualDmgHealth;
+				pawn.ArmorValue += ev.ActualDmgArmor;
 			}
 		}
 
@@ -521,7 +521,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		var attacker = ev.Accessor.GetPlayer("attacker");
 		var victim = ev.UserIdPlayer;
 
-		if (!attacker.IsValid || !victim.IsValid)
+		if (attacker is null || !attacker.IsValid || victim is null || !victim.IsValid)
 			return HookResult.Continue;
 
 		var attackerArena = _playerManager.GetPlayer(attacker)?.CurrentArena;
