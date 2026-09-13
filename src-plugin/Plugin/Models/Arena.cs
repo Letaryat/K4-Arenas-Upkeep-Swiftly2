@@ -220,7 +220,10 @@ public sealed partial class Plugin
 				return;
 
 			var localizer = Core.Translation.GetPlayerLocalizer(player.Player);
-			var opponentNames = string.Join(", ", GetOpponents(player.Player).Select(p => p.Player.Controller.PlayerName));
+			var opponents = GetOpponents(player.Player).Select(p => p.Player.Controller.PlayerName).ToList();
+			var opponentNames = opponents.Count > 0
+				? string.Join(", ", opponents)
+				: localizer["k4.general.no_opponent"];
 			var arenaName = GetDisplayName();
 			var roundName = Id == -1
 				? localizer["k4.general.random"]

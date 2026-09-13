@@ -17,7 +17,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.3", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.4", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -1011,6 +1011,13 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		return realPlayersInArenas <= 1;
 	}
 
+	/// <summary>
+	/// True if there is exactly one real (non-bot) player connected to the whole server.
+	/// SwiftlyS2's IPlayer.IsValid already excludes HLTV/GOTV clients, so they never count here.
+	/// </summary>
+	private bool IsAloneOnServer() =>
+		Core.PlayerManager.GetAllPlayers().Count(p => p.IsValid && !p.IsFakeClient) == 1;
+
 	private void TerminateRoundIfPossible()
 	{
 		var gameRules = Core.EntitySystem.GetGameRules();
@@ -1020,14 +1027,22 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (gameRules.WarmupPeriod == true)
 			return;
 
-		// Check if any real players exist
+		var isAloneOnServer = IsAloneOnServer();
+
+		// Check if any real players exist that are already on a playing team.
+		// A lone player who just connected and is still sitting in the queue/spectator
+		// would otherwise never trigger a round restart, so they'd never get placed
+		// on the map - the isAloneOnServer check below covers that case explicitly.
 		var hasRealPlayers = Core.PlayerManager.GetAllPlayers()
 			.Any(p => p.IsValid && !p.IsFakeClient && p.Controller.Team > Team.Spectator);
 
-		if (!hasRealPlayers)
+		if (!hasRealPlayers && !isAloneOnServer)
 			return;
 
-		if (_arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
+		// A player who is completely alone on the server always deserves an immediate
+		// round restart so they get placed onto the map solo, regardless of what
+		// bot-only arenas or queue state say.
+		if (isAloneOnServer || _arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
 		{
 			_arenaManager.IsBetweenRounds = true;
 
