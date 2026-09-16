@@ -17,7 +17,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.4", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.3", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -893,6 +893,14 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private void SetupPlayer(IPlayer player)
 	{
+		// Defense in depth: IPlayer.IsValid is supposed to already exclude HLTV/GOTV,
+		// but every SIGSEGV/SEGV_MAPERR crash we've root-caused reproduces a few
+		// seconds after map load - exactly when SourceTV connects and this method
+		// first runs for it - so IsValid's HLTV check can't be fully trusted here.
+		// Reject it explicitly before it ever enters the arena queue.
+		if (player.Controller?.IsHLTV == true)
+			return;
+
 		var arenaPlayer = _playerManager.AddOrUpdatePlayer(player);
 		arenaPlayer.SetWaiting();
 		_playerManager.EnqueueWaiting(arenaPlayer);

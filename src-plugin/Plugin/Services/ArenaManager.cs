@@ -456,12 +456,39 @@ public sealed partial class Plugin
 		private ArenaPlayer? DequeueValidWaitingPlayer()
 		{
 			var ordered = _playerManager.GetWaitingPlayersOrdered();
-			var player = ordered.FirstOrDefault(p => p.IsValid && !p.IsAfk);
+			var player = ordered.FirstOrDefault(p => p.IsValid && !p.IsAfk && IsSafeToRespawn(p));
 
 			if (player != null)
 				_playerManager.DequeueWaiting(player);
 
 			return player;
+		}
+
+		/// <summary>
+		/// Extra validity check before pulling a player out of the queue to respawn/
+		/// teleport them into an arena. ArenaPlayer.IsValid (Player.IsValid) already
+		/// requires a resolvable pawn, but the pawn's body component / scene node can
+		/// still be unattached for a moment right after connecting - bots especially,
+		/// and especially during the very first warmup population cycle a few seconds
+		/// after map load. Respawning/teleporting a player before that is attached is
+		/// what has been reproducibly crashing the server with a SIGSEGV/SEGV_MAPERR
+		/// shortly after every map load. Skipping such a player here just leaves them
+		/// in the queue for the next 2-second warmup population tick, by which point
+		/// they're normally ready - nobody gets stuck.
+		/// </summary>
+		private static bool IsSafeToRespawn(ArenaPlayer player)
+		{
+			if (!player.IsValid)
+				return false;
+
+			// Defense in depth: IPlayer.IsValid is documented/implemented to already
+			// exclude HLTV/GOTV clients, but this is exactly the code path that has
+			// been crashing the server, so it costs nothing to double-check explicitly
+			// rather than rely solely on that.
+			if (player.Player.Controller?.IsHLTV == true)
+				return false;
+
+			return player.Player.PlayerPawn?.CBodyComponent?.SceneNode != null;
 		}
 
 		private static void AddValidPlayers(IEnumerable<ArenaPlayer>? players, List<ArenaPlayer> target)

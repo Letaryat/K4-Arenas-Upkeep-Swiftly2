@@ -262,6 +262,18 @@ public sealed partial class Plugin
 			if (!IsValid || SpawnLocation is not { } spawn)
 				return;
 
+			// IsValid confirms the pawn entity exists, but its body component /
+			// scene node can still be unattached for a brief moment - especially
+			// for bots, and especially in the first couple of seconds after a
+			// fresh map load. Player.Teleport() reaches straight into native
+			// schema memory for that scene node, and calling it before it's
+			// attached is what has been reproducibly crashing the server with a
+			// SIGSEGV/SEGV_MAPERR a few seconds after every map load. Skipping
+			// here just means this player is tried again on the next warmup
+			// population tick, by which point the pawn is normally ready.
+			if (Player.PlayerPawn?.CBodyComponent?.SceneNode == null)
+				return;
+
 			Player.Teleport(spawn.Position, spawn.Angle, Vector.Zero);
 		}
 
