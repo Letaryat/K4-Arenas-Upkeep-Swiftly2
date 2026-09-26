@@ -17,7 +17,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.3", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.5", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -36,10 +36,14 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private PlayerManager _playerManager = null!;
 	private ArenaManager _arenaManager = null!;
 	private DatabaseService _databaseService = null!;
-
+	private MapServices _mapServices = null!;
 	private CancellationTokenSource? _warmupTimerCts;
 	private CancellationTokenSource? _clantagTimerCts;
 	private Guid? _jointeamHookGuid;
+
+	private CancellationTokenSource? _warmupCts;
+	private bool _mapActive;
+
 
 	public override void Load(bool hotReload)
 	{
@@ -114,6 +118,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_playerManager = new PlayerManager();
 		_arenaManager = new ArenaManager(_playerManager);
 		_databaseService = new DatabaseService(Config.CurrentValue.DatabaseConnection, Config.CurrentValue.DatabasePurgeDays);
+		_mapServices = new MapServices();
 
 		Task.Run(async () =>
 		{
@@ -198,8 +203,11 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		});
 	}
 
-	private static void ApplyGameConfig()
+	private void ApplyGameConfig()
 	{
+		Core.Logger.LogInformation("[K4-Arenas] Execing custom config");
+		_mapServices.ExecCustomConfig();
+		/*
 		Core.Engine.ExecuteCommand("mp_join_grace_time 0");
 		Core.Engine.ExecuteCommand("mp_t_default_secondary \"\"");
 		Core.Engine.ExecuteCommand("mp_ct_default_secondary \"\"");
@@ -208,6 +216,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		Core.Engine.ExecuteCommand("mp_equipment_reset_rounds 0");
 		Core.Engine.ExecuteCommand("mp_free_armor 0");
 		Core.Engine.ExecuteCommand("mp_autoteambalance 0");
+		*/
 	}
 
 	#region Event Handlers
@@ -216,7 +225,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	{
 		Task.Run(() => _databaseService.PurgeOldRecordsAsync());
 
-		Core.Scheduler.DelayBySeconds(0.1f, () =>
+		Core.Scheduler.DelayBySeconds(0.2f, () =>
 		{
 			Weapons.InitializeCache();
 
@@ -239,26 +248,6 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 				}
 			}
 
-			// Setup warmup timer
-			Core.Scheduler.DelayBySeconds(3f, () =>
-			{
-				if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
-				{
-					_warmupTimerCts = Core.Scheduler.RepeatBySeconds(2f, () =>
-					{
-						if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
-						{
-							_arenaManager.PopulateWarmupMatches();
-						}
-						else
-						{
-							_warmupTimerCts?.Cancel();
-							_warmupTimerCts = null;
-						}
-					});
-				}
-			});
-
 			// Setup clantag refresh timer if enabled
 			if (!Config.CurrentValue.Compatibility.DisableClantags)
 			{
@@ -267,29 +256,190 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		});
 	}
 
-	private void OnMapUnload(IOnMapUnloadEvent @event)
-	{
-		_arenaManager.Shutdown();
+	/*
+		private void OnMapLoad(IOnMapLoadEvent @event)
+		{
+			_ = PurgeOldRecordsSafeAsync();
 
-		_warmupTimerCts?.Cancel();
-		_warmupTimerCts = null;
+			Core.Scheduler.DelayBySeconds(0.3f, () =>
+			{
+				try
+				{
+					Weapons.InitializeCache();
+
+					_arenaManager.Initialize();
+
+					if (Config.CurrentValue.UsePredefinedConfig)
+					{
+						ApplyGameConfig();
+					}
+
+					CheckCommonProblems();
+
+					foreach (var player in Core.PlayerManager.GetAllPlayers())
+					{
+						if (player.IsValid && !_playerManager.HasPlayer(player))
+						{
+							SetupPlayer(player);
+						}
+					}
+
+					StartClantagTimerSafe();
+				}
+				catch (Exception ex)
+				{
+					// Podmień na logger używany w pluginie
+					Core.Logger.LogError($"Exception during map initialization: {ex}");
+				}
+			});
+		}
+	*/
+	private void StartPurgeTask()
+	{
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await _databaseService.PurgeOldRecordsAsync();
+			}
+			catch (Exception ex)
+			{
+				Core.Logger.LogError($"Background database purge failed: {ex}");
+			}
+		});
 	}
 
+
+	private void StartClantagTimerSafe()
+	{
+		try
+		{
+			_clantagTimerCts?.Cancel();
+			_clantagTimerCts?.Dispose();
+			_clantagTimerCts = null;
+
+			if (!Config.CurrentValue.Compatibility.DisableClantags)
+			{
+				_clantagTimerCts = Core.Scheduler.RepeatBySeconds(
+					3f,
+					RefreshAllClantagsSafe
+				);
+			}
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError($"Failed to start clantag timer: {ex}");
+		}
+	}
+
+	private void RefreshAllClantagsSafe()
+	{
+		try
+		{
+			RefreshAllClantags();
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError($"RefreshAllClantags failed: {ex}");
+		}
+	}
+
+
+	private async Task PurgeOldRecordsSafeAsync()
+	{
+		try
+		{
+			await _databaseService.PurgeOldRecordsAsync();
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError($"PurgeOldRecordsAsync failed: {ex}");
+		}
+	}
+
+	/*
+		private void OnMapLoad(IOnMapLoadEvent @event)
+		{
+			_mapActive = true;
+
+			_warmupCts?.Cancel();
+			_warmupCts = null;
+
+			Core.Scheduler.DelayBySeconds(3f, () =>
+			{
+				if (!_mapActive)
+					return;
+
+				CheckCommonProblems();
+			});
+
+
+			Core.Scheduler.DelayBySeconds(3f, () =>
+			{
+				Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] A");
+
+				if (!_mapActive)
+				{
+					Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] B - map inactive");
+					return;
+				}
+
+				Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] C");
+
+				var rules = Core.EntitySystem.GetGameRules();
+
+				Core.Logger.LogInformation(
+					"K4-Arenas [MAPLOAD-3S] D - rules={Rules}",
+					rules != null
+				);
+
+				if (rules?.WarmupPeriod != true)
+				{
+					Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] E - no warmup");
+					return;
+				}
+
+				Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] F - executing mp_warmup_end");
+
+				Core.Engine.ExecuteCommand("mp_warmup_end");
+
+				Core.Logger.LogInformation("K4-Arenas [MAPLOAD-3S] G - command executed");
+			});
+
+		}
+
+	*/
+	private void OnMapUnload(IOnMapUnloadEvent @event)
+	{
+		_mapActive = false;
+
+		_warmupCts?.Cancel();
+		_warmupCts = null;
+
+		_arenaManager.Shutdown();
+	}
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
-		var player = Core.PlayerManager.GetPlayer(@event.UserId);
-
-		if (player?.IsValid != true)
-			return HookResult.Continue;
-
-		if (_playerManager.HasPlayer(player))
-			return HookResult.Continue;
-
-		SetupPlayer(player);
-
-		if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
+		try
 		{
-			TerminateRoundIfPossible();
+			var player = Core.PlayerManager.GetPlayer(@event.UserId);
+
+			if (player?.IsValid != true)
+				return HookResult.Continue;
+
+			if (_playerManager.HasPlayer(player))
+				return HookResult.Continue;
+
+			SetupPlayer(player);
+
+			if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
+			{
+				TerminateRoundIfPossible();
+			}
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError(ex, "OnPlayerActivate failed unexpectedly for UserId {UserId}", @event.UserId);
 		}
 
 		return HookResult.Continue;
@@ -893,12 +1043,10 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private void SetupPlayer(IPlayer player)
 	{
-		// Defense in depth: IPlayer.IsValid is supposed to already exclude HLTV/GOTV,
-		// but every SIGSEGV/SEGV_MAPERR crash we've root-caused reproduces a few
-		// seconds after map load - exactly when SourceTV connects and this method
-		// first runs for it - so IsValid's HLTV check can't be fully trusted here.
-		// Reject it explicitly before it ever enters the arena queue.
-		if (player.Controller?.IsHLTV == true)
+		// Reject anything without a real player controller (HLTV/GOTV included) -
+		// `Controller?.IsHLTV == true` was a no-op when Controller is null, which is
+		// exactly the SourceTV case this was meant to catch.
+		if (player.Controller is not { IsHLTV: false })
 			return;
 
 		var arenaPlayer = _playerManager.AddOrUpdatePlayer(player);
@@ -953,7 +1101,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			controller.Clan = newTag;
 			controller.ClanUpdated();
 			if (Core.GameEvent.IsListeningToEvent<EventNextlevelChanged>(arenaPlayer.Player.PlayerID))
-    			Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(arenaPlayer.Player.PlayerID);
+				Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(arenaPlayer.Player.PlayerID);
 		});
 	}
 
@@ -1028,66 +1176,76 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private void TerminateRoundIfPossible()
 	{
-		var gameRules = Core.EntitySystem.GetGameRules();
-		if (_arenaManager.IsBetweenRounds || gameRules == null)
-			return;
-
-		if (gameRules.WarmupPeriod == true)
-			return;
-
-		var isAloneOnServer = IsAloneOnServer();
-
-		// Check if any real players exist that are already on a playing team.
-		// A lone player who just connected and is still sitting in the queue/spectator
-		// would otherwise never trigger a round restart, so they'd never get placed
-		// on the map - the isAloneOnServer check below covers that case explicitly.
-		var hasRealPlayers = Core.PlayerManager.GetAllPlayers()
-			.Any(p => p.IsValid && !p.IsFakeClient && p.Controller.Team > Team.Spectator);
-
-		if (!hasRealPlayers && !isAloneOnServer)
-			return;
-
-		// A player who is completely alone on the server always deserves an immediate
-		// round restart so they get placed onto the map solo, regardless of what
-		// bot-only arenas or queue state say.
-		if (isAloneOnServer || _arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
+		try
 		{
-			_arenaManager.IsBetweenRounds = true;
+			var gameRules = Core.EntitySystem.GetGameRules();
+			if (_arenaManager.IsBetweenRounds || gameRules == null)
+				return;
 
-			Core.Scheduler.NextWorldUpdate(() =>
+			if (gameRules.WarmupPeriod == true)
+				return;
+
+			var isAloneOnServer = IsAloneOnServer();
+
+			var hasRealPlayers = Core.PlayerManager.GetAllPlayers()
+				.Any(p => p.IsValid && !p.IsFakeClient && (p.Controller?.Team ?? Team.None) > Team.Spectator);
+
+			if (!hasRealPlayers && !isAloneOnServer)
+				return;
+
+			if (isAloneOnServer || _arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
 			{
-				var tCount = 0;
-				var ctCount = 0;
+				_arenaManager.IsBetweenRounds = true;
 
-				foreach (var p in Core.PlayerManager.GetAllPlayers())
+				Core.Scheduler.NextWorldUpdate(() =>
 				{
-					if (!p.IsValid || p.PlayerPawn?.Health <= 0 || (p.Controller?.Team ?? Team.None) <= Team.Spectator)
-						continue;
+					try
+					{
+						var tCount = 0;
+						var ctCount = 0;
 
-					if (p.Controller?.Team == Team.T) tCount++;
-					else if (p.Controller?.Team == Team.CT) ctCount++;
-				}
+						foreach (var p in Core.PlayerManager.GetAllPlayers())
+						{
+							if (!p.IsValid || p.PlayerPawn?.Health <= 0 || (p.Controller?.Team ?? Team.None) <= Team.Spectator)
+								continue;
 
-				var delay = Core.ConVar.Find<float>("mp_round_restart_delay")?.Value ?? 3f;
-				RoundEndReason reason;
+							if (p.Controller?.Team == Team.T) tCount++;
+							else if (p.Controller?.Team == Team.CT) ctCount++;
+						}
 
-				if (tCount > ctCount)
-				{
-					reason = RoundEndReason.TerroristsWin;
-				}
-				else if (ctCount > tCount)
-				{
-					reason = RoundEndReason.CTsWin;
-				}
-				else
-				{
-					reason = Config.CurrentValue.Compatibility.PreventDrawRounds
-						? (Random.Shared.Next(2) == 0 ? RoundEndReason.CTsWin : RoundEndReason.TerroristsWin)
-						: RoundEndReason.RoundDraw;
-				}
+						var delay = Core.ConVar.Find<float>("mp_round_restart_delay")?.Value ?? 3f;
+						RoundEndReason reason;
 
-				Core.EntitySystem.GetGameRules()?.TerminateRound(reason, delay);
-			});
+						if (tCount > ctCount)
+							reason = RoundEndReason.TerroristsWin;
+						else if (ctCount > tCount)
+							reason = RoundEndReason.CTsWin;
+						else
+							reason = Config.CurrentValue.Compatibility.PreventDrawRounds
+								? (Random.Shared.Next(2) == 0 ? RoundEndReason.CTsWin : RoundEndReason.TerroristsWin)
+								: RoundEndReason.RoundDraw;
+
+						Core.EntitySystem.GetGameRules()?.TerminateRound(reason, delay);
+					}
+					catch (Exception ex)
+					{
+						Core.Logger.LogError(ex, "TerminateRoundIfPossible: deferred round-end logic failed");
+					}
+				});
+			}
+		}
+		catch (ObjectDisposedException)
+		{
+			// A player object (very often the one mid-disconnect right now, since this
+			// runs from OnClientDisconnected among other places) got disposed between
+			// GetAllPlayers() returning it and us touching its properties. Every IPlayer
+			// getter - IsValid included - throws in that case; `?.` alone doesn't help
+			// because it's the getter call itself that throws, not a null result.
+			// Skip this pass; the next trigger re-evaluates with a clean player list.
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError(ex, "TerminateRoundIfPossible failed unexpectedly");
 		}
 	}
 

@@ -260,12 +260,13 @@ public sealed partial class Plugin
 		/// <summary>Respawns player into their assigned arena</summary>
 		private static void RespawnPlayer(ArenaPlayer player)
 		{
-			if (!player.IsValid)
+			if (!IsSafeToRespawn(player))
 				return;
 
 			var pawn = player.Player.PlayerPawn;
+
 			if (pawn?.LifeState == (byte)LifeState_t.LIFE_ALIVE)
-				return; // Already alive
+				return;
 
 			player.Player.Respawn();
 		}
@@ -481,14 +482,26 @@ public sealed partial class Plugin
 			if (!player.IsValid)
 				return false;
 
-			// Defense in depth: IPlayer.IsValid is documented/implemented to already
-			// exclude HLTV/GOTV clients, but this is exactly the code path that has
-			// been crashing the server, so it costs nothing to double-check explicitly
-			// rather than rely solely on that.
-			if (player.Player.Controller?.IsHLTV == true)
+			var controller = player.Player.Controller;
+
+			if (controller == null || !controller.IsValid)
 				return false;
 
-			return player.Player.PlayerPawn?.CBodyComponent?.SceneNode != null;
+			if (controller.IsHLTV)
+				return false;
+
+			var pawn = player.Player.PlayerPawn;
+
+			if (pawn == null || !pawn.IsValid)
+				return false;
+
+			if (pawn.CBodyComponent == null)
+				return false;
+
+			if (pawn.CBodyComponent.SceneNode == null)
+				return false;
+
+			return true;
 		}
 
 		private static void AddValidPlayers(IEnumerable<ArenaPlayer>? players, List<ArenaPlayer> target)
