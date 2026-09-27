@@ -17,7 +17,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.5", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -144,6 +144,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		Core.GameEvent.HookPost<EventPlayerSpawn>(OnPlayerSpawn);
 		Core.GameEvent.HookPost<EventPlayerDeath>(OnPlayerDeath);
 		Core.GameEvent.HookPre<EventPlayerTeam>(OnPlayerTeam);
+		Core.GameEvent.HookPre<EventRoundAnnounceMatchStart>(OnMatchStart);
 
 		// Block MVP event
 		Core.GameEvent.HookPre<EventRoundMvp>(OnRoundMvp);
@@ -161,6 +162,17 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 		// Hook jointeam command to block unauthorized team switches
 		_jointeamHookGuid = Core.Command.HookClientCommand(OnJoinTeamCommand);
+	}
+
+	private HookResult OnMatchStart(EventRoundAnnounceMatchStart eventObj)
+	{
+		// Sometimes server restart on the same map and workshop does not want to exec my config
+		Core.Scheduler.DelayBySeconds(2.0f, () =>
+		{
+			ApplyGameConfig();
+		});
+
+		return HookResult.Continue;
 	}
 
 	private void RegisterCommands()
@@ -446,19 +458,19 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	}
 
 	private HookResult OnClientDisconnected(EventPlayerDisconnect @event)
-	{
-		var player = Core.PlayerManager.GetPlayer(@event.UserId);
-		if (player != null)
-		{
-			// Remove from arena first
-			_arenaManager.RemovePlayerFromArena(player);
-			// Then remove from player manager
-			_playerManager.RemovePlayer(player);
-		}
+    {
+        var player = Core.PlayerManager.GetPlayer(@event.UserId);
+        if (player != null && !player.Controller.IsHLTV)
+        {
+            // Remove from arena first
+            _arenaManager.RemovePlayerFromArena(player);
+            // Then remove from player manager
+            _playerManager.RemovePlayer(player);
+        }
 
-		TerminateRoundIfPossible();
-		return HookResult.Continue;
-	}
+        TerminateRoundIfPossible();
+        return HookResult.Continue;
+    }
 
 	private HookResult OnRoundPrestart(EventRoundPrestart ev)
 	{
@@ -524,7 +536,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private HookResult OnPlayerSpawn(EventPlayerSpawn ev)
 	{
 		var player = ev.UserIdPlayer;
-		if (player is null || !player.IsValid)
+		if (player is null || !player.IsValid || player.Controller.IsHLTV)
 			return HookResult.Continue;
 
 		var arenaPlayer = _playerManager.GetPlayer(player);
@@ -1178,6 +1190,11 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	{
 		try
 		{
+			if (Core.Game.MatchData.Phase == GamePhase.GAMEPHASE_MATCH_ENDED)
+			{
+				Core.Logger.LogInformation("[K4-Arenas] Match has ended. Aborting TerminateRoundIfPossible");
+				return;
+			}
 			var gameRules = Core.EntitySystem.GetGameRules();
 			if (_arenaManager.IsBetweenRounds || gameRules == null)
 				return;
@@ -1196,6 +1213,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			if (isAloneOnServer || _arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
 			{
 				_arenaManager.IsBetweenRounds = true;
+
+				// Capture gameRules reference to avoid re-fetching
+				var capturedGameRules = gameRules;
 
 				Core.Scheduler.NextWorldUpdate(() =>
 				{
@@ -1225,7 +1245,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 								? (Random.Shared.Next(2) == 0 ? RoundEndReason.CTsWin : RoundEndReason.TerroristsWin)
 								: RoundEndReason.RoundDraw;
 
-						Core.EntitySystem.GetGameRules()?.TerminateRound(reason, delay);
+						capturedGameRules?.TerminateRound(reason, delay);
 					}
 					catch (Exception ex)
 					{
@@ -1236,12 +1256,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		}
 		catch (ObjectDisposedException)
 		{
-			// A player object (very often the one mid-disconnect right now, since this
-			// runs from OnClientDisconnected among other places) got disposed between
-			// GetAllPlayers() returning it and us touching its properties. Every IPlayer
-			// getter - IsValid included - throws in that case; `?.` alone doesn't help
-			// because it's the getter call itself that throws, not a null result.
-			// Skip this pass; the next trigger re-evaluates with a clean player list.
+			// ...existing code...
 		}
 		catch (Exception ex)
 		{
