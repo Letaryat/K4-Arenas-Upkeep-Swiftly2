@@ -58,53 +58,45 @@ public sealed partial class Plugin
 				using var connection = Core.Database.GetConnection(_connectionName);
 				connection.Open();
 
-				// Check if player exists
 				var dbPlayer = await connection.FirstOrDefaultAsync<DbPlayer>(p => p.SteamId64 == steamId);
 
 				if (dbPlayer == null)
 				{
-					// Create new player record
-					dbPlayer = new DbPlayer
-					{
-						SteamId64 = steamId,
-						LastSeen = DateTime.UtcNow
-					};
+					dbPlayer = new DbPlayer { SteamId64 = steamId, LastSeen = DateTime.UtcNow };
 					await connection.InsertAsync(dbPlayer);
 				}
 				else
 				{
-					// Update last seen
 					dbPlayer.LastSeen = DateTime.UtcNow;
 					await connection.UpdateAsync(dbPlayer);
 				}
 
-				// Load weapon prefs
 				var weapons = await connection.SelectAsync<DbWeaponPreference>(w => w.SteamId64 == steamId);
-
+				var weaponPrefs = new List<(CSWeaponType Type, ItemDefinitionIndex Item)>();
 				foreach (var weapon in weapons)
 				{
 					var weaponType = ParseWeaponType(weapon.WeaponType);
 					if (weaponType.HasValue)
-						player.SetWeaponPreference(weaponType.Value, (ItemDefinitionIndex)weapon.WeaponId);
+						weaponPrefs.Add((weaponType.Value, (ItemDefinitionIndex)weapon.WeaponId));
 				}
 
-				// Load round prefs and clean up deleted rounds
 				var rounds = await connection.SelectAsync<DbRoundPreference>(r => r.SteamId64 == steamId);
 				var roundsToDelete = new List<int>();
 
-				// Start with defaults
-				player.EnabledRoundTypes.Clear();
+				// Build the result set LOCALLY first - don't touch player.EnabledRoundTypes
+				// from this background thread. It's a plain HashSet<int> and the main game
+				// thread reads/mutates it concurrently (round menu, match setup); writing
+				// to it here was an unsynchronized cross-thread race.
+				var enabledRoundTypes = new HashSet<int>();
 				foreach (var roundType in RoundTypes.All)
 				{
 					if (roundType.EnabledByDefault)
-						player.EnabledRoundTypes.Add(roundType.Id);
+						enabledRoundTypes.Add(roundType.Id);
 				}
 
-				// Apply stored prefs
 				foreach (var round in rounds)
 				{
 					var roundType = RoundTypes.GetByName(round.RoundName);
-
 					if (roundType == null)
 					{
 						roundsToDelete.Add(round.Id);
@@ -112,12 +104,11 @@ public sealed partial class Plugin
 					}
 
 					if (round.Enabled)
-						player.EnabledRoundTypes.Add(roundType.Id);
+						enabledRoundTypes.Add(roundType.Id);
 					else
-						player.EnabledRoundTypes.Remove(roundType.Id);
+						enabledRoundTypes.Remove(roundType.Id);
 				}
 
-				// Clean up deleted rounds
 				if (roundsToDelete.Count > 0)
 				{
 					foreach (var id in roundsToDelete)
@@ -129,18 +120,38 @@ public sealed partial class Plugin
 					Core.Logger.LogDebug("Cleaned up {Count} deleted round preferences for {SteamId}", roundsToDelete.Count, steamId);
 				}
 
-				// Ensure at least one round type enabled
-				if (player.EnabledRoundTypes.Count == 0)
+				if (enabledRoundTypes.Count == 0)
 				{
-					foreach (var rt in RoundTypes.All)
-					{
-						player.EnabledRoundTypes.Add(rt.Id);
-						break;
-					}
+					var first = RoundTypes.All.FirstOrDefault();
+					if (first != null)
+						enabledRoundTypes.Add(first.Id);
 				}
 
-				player.IsLoaded = true;
-				return true;
+				// Everything below touches ArenaPlayer state the main thread also owns -
+				// apply it there instead of from this background thread.
+				var tcs = new TaskCompletionSource<bool>();
+				Core.Scheduler.NextTick(() =>
+				{
+					try
+					{
+						foreach (var pref in weaponPrefs)
+							player.SetWeaponPreference(pref.Type, pref.Item);
+
+						player.EnabledRoundTypes.Clear();
+						foreach (var id in enabledRoundTypes)
+							player.EnabledRoundTypes.Add(id);
+
+						player.IsLoaded = true;
+						tcs.TrySetResult(true);
+					}
+					catch (Exception ex)
+					{
+						Core.Logger.LogError(ex, "Failed to apply loaded player preferences for {SteamId}", steamId);
+						tcs.TrySetResult(false);
+					}
+				});
+
+				return await tcs.Task;
 			}
 			catch (Exception ex)
 			{

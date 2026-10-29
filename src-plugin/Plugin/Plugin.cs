@@ -13,11 +13,12 @@ using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Plugins;
+using SwiftlyS2.Shared.ProtobufDefinitions;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6.2", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -432,45 +433,55 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	}
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
-		try
+		var userId = @event.UserId; // skopiuj teraz, nie używaj @event w lambdzie
+
+		Core.Scheduler.NextWorldUpdate(() =>
 		{
-			var player = Core.PlayerManager.GetPlayer(@event.UserId);
-
-			if (player?.IsValid != true)
-				return HookResult.Continue;
-
-			if (_playerManager.HasPlayer(player))
-				return HookResult.Continue;
-
-			SetupPlayer(player);
-
-			if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
+			try
 			{
-				TerminateRoundIfPossible();
+				var player = Core.PlayerManager.GetPlayer(userId);
+				if (player?.IsValid != true)
+					return;
+
+				if (_playerManager.HasPlayer(player))
+					return;
+
+				SetupPlayer(player);
+
+				if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
+					TerminateRoundIfPossible();
 			}
-		}
-		catch (Exception ex)
-		{
-			Core.Logger.LogError(ex, "OnPlayerActivate failed unexpectedly for UserId {UserId}", @event.UserId);
-		}
+			catch (Exception ex)
+			{
+				Core.Logger.LogError(ex, "OnPlayerActivate (deferred) failed for UserId {UserId}", userId);
+			}
+		});
 
 		return HookResult.Continue;
 	}
 
-	private HookResult OnClientDisconnected(EventPlayerDisconnect @event)
-    {
-        var player = Core.PlayerManager.GetPlayer(@event.UserId);
-        if (player != null && !player.Controller.IsHLTV)
-        {
-            // Remove from arena first
-            _arenaManager.RemovePlayerFromArena(player);
-            // Then remove from player manager
-            _playerManager.RemovePlayer(player);
-        }
 
-        TerminateRoundIfPossible();
-        return HookResult.Continue;
-    }
+	private HookResult OnClientDisconnected(EventPlayerDisconnect @event)
+	{
+		// Serwer się zamyka - nie dotykaj niczego.
+		if (@event.Reason == (short)ENetworkDisconnectionReason.NETWORK_DISCONNECT_SHUTDOWN)
+			return HookResult.Continue;
+
+		var player = Core.PlayerManager.GetPlayer(@event.UserId);
+		if (player != null)
+		{
+			// Czysto zarządzane operacje na własnych kolekcjach - bezpieczne w evencie.
+			_arenaManager.RemovePlayerFromArena(player);
+			_playerManager.RemovePlayer(player);
+		}
+
+		// Nie iteruj po graczach (IsValid czyta natywny kontroler) w trakcie samego
+		// eventu rozłączenia - wychodzący gracz jest wtedy jeszcze na liście,
+		// a jego encja może być w połowie niszczona. Wykonaj to chwilę później.
+		Core.Scheduler.NextWorldUpdate(TerminateRoundIfPossible);
+
+		return HookResult.Continue;
+	}
 
 	private HookResult OnRoundPrestart(EventRoundPrestart ev)
 	{
@@ -536,7 +547,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private HookResult OnPlayerSpawn(EventPlayerSpawn ev)
 	{
 		var player = ev.UserIdPlayer;
-		if (player is null || !player.IsValid || player.Controller.IsHLTV)
+		if (player is null || !player.IsValid || player.Controller is not { IsHLTV: false })
 			return HookResult.Continue;
 
 		var arenaPlayer = _playerManager.GetPlayer(player);
@@ -1214,13 +1225,17 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			{
 				_arenaManager.IsBetweenRounds = true;
 
-				// Capture gameRules reference to avoid re-fetching
-				var capturedGameRules = gameRules;
-
 				Core.Scheduler.NextWorldUpdate(() =>
 				{
 					try
 					{
+						var liveGameRules = Core.EntitySystem.GetGameRules();
+						if (liveGameRules == null)
+							return;
+
+						if (Core.Game.MatchData.Phase == GamePhase.GAMEPHASE_MATCH_ENDED || liveGameRules.WarmupPeriod == true)
+							return;
+
 						var tCount = 0;
 						var ctCount = 0;
 
@@ -1245,7 +1260,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 								? (Random.Shared.Next(2) == 0 ? RoundEndReason.CTsWin : RoundEndReason.TerroristsWin)
 								: RoundEndReason.RoundDraw;
 
-						capturedGameRules?.TerminateRound(reason, delay);
+						liveGameRules.TerminateRound(reason, delay);
 					}
 					catch (Exception ex)
 					{
