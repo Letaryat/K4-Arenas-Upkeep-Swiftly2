@@ -134,10 +134,15 @@ public sealed partial class Plugin
 		/// <summary>Resets all players to waiting (call on map change)</summary>
 		public void ClearAllArenaAssignments()
 		{
+			_waitingQueue.Clear();
+
 			foreach (var player in _players.Values)
 			{
-				if (player.IsValid)
-					player.SetWaiting();
+				if (!player.IsValid)
+					continue;
+
+				player.SetWaiting();
+				EnqueueWaiting(player);
 			}
 		}
 

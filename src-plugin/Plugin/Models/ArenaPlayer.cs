@@ -66,7 +66,7 @@ public sealed partial class Plugin
 			Player = player;
 			SteamId = player.SteamID;
 			PlayerId = player.PlayerID;
-			
+
 			// start with all default rounds enabled
 			foreach (var roundType in RoundTypes.All.Where(r => r.EnabledByDefault))
 			{
@@ -88,7 +88,39 @@ public sealed partial class Plugin
 
 		/// <summary>Gets clan tag based on current state (arena name or waiting/afk)</summary>
 		public string GetClanTag() => CurrentArena?.GetClanTag()
-			?? (IsAfk ? $"{Core.Localizer["k4.general.afk"]} |" : $"{Core.Localizer["k4.general.waiting"]} |");
+			?? (IsAfk ? $"{Core.Localizer["k4.general.afk"]}" : $"{Core.Localizer["k4.general.waiting"]}");
+
+		/// <summary>
+		/// Writes the arena rank onto the scoreboard (MVPs / Score / Damage) so the tab
+		/// is sorted by arena. Call right after the player spawned into their arena.
+		/// </summary>
+		public void ApplyScoreboardOrder()
+		{
+			if (!IsValid || CurrentArena == null)
+				return;
+
+			// In SwiftlyS2 Controller is never null - it returns a zero-address wrapper
+			// when the entity is missing, so check IsValid before touching any field.
+			var controller = Player.Controller;
+			if (!controller.IsValid)
+				return;
+
+			var arenaScore = CurrentArena.Score;
+
+			controller.MVPs = MvpCount;
+			controller.MVPsUpdated();
+
+			controller.Score = arenaScore;
+			controller.ScoreUpdated();
+
+			var tracking = controller.ActionTrackingServices;
+			if (tracking != null)
+			{
+				tracking.MatchStats.Damage = arenaScore + 150;
+				controller.ActionTrackingServicesUpdated();
+			}
+		}
+
 
 		/// <summary>Updates the IPlayer ref (used on reconnect)</summary>
 		public void UpdatePlayerReference(IPlayer player) => Player = player;

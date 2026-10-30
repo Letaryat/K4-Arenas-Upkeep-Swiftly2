@@ -193,6 +193,7 @@ public sealed partial class Plugin
 				return;
 
 			player.TeleportToSpawn();
+			player.ApplyScoreboardOrder();   // <-- tu
 
 			var pawn = player.Player.PlayerPawn;
 			pawn?.Health = 100;
@@ -229,7 +230,7 @@ public sealed partial class Plugin
 				? localizer["k4.general.random"]
 				: localizer[CurrentRoundType?.Name ?? "k4.general.random"];
 
-			var freezeTimeMs = (Core.ConVar.Find<int>("mp_freezetime")?.Value ?? 7) * 1000;
+			var freezeTimeMs = 6000;
 			player.Player.SendCenterHTML(localizer["k4.chat.arena_roundstart_html", arenaName, opponentNames, roundName], freezeTimeMs);
 			player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstart", arenaName, opponentNames, roundName]}");
 		}
@@ -241,8 +242,11 @@ public sealed partial class Plugin
 
 		/// <summary>Clan tag for scoreboard</summary>
 		public string GetClanTag() => Id == -1
-			? $"{Core.Localizer["k4.general.warmup"]} |"
-			: $"{Core.Localizer["k4.general.arena"]} {Id + 1} |";
+			? $"{Core.Localizer["k4.general.warmup"]}"
+			: $"{Core.Localizer["k4.general.arena"]} {Id + 1}";
+
+
+
 
 		/// <summary>Converts to API DTO</summary>
 		public ArenaInfo ToInfo() => new()

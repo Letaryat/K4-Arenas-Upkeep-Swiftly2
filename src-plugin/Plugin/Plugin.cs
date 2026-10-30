@@ -429,6 +429,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_warmupCts?.Cancel();
 		_warmupCts = null;
 
+		_playerManager.Clear();
 		_arenaManager.Shutdown();
 	}
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
@@ -581,7 +582,16 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			return HookResult.Continue;
 		}
 
-		Core.Logger.LogInformation("[diag] spawn without arena -> spectator, state={State}", arenaPlayer?.State.ToString() ?? "untracked");
+		Core.Logger.LogInformation(
+			"[diag] SPAWN id={Id} bot={Bot} state={State} arena={Arena} team={Team} alive={Alive} waiting={Waiting}",
+			arenaPlayer?.PlayerId ?? -1,
+			player.IsFakeClient,
+			arenaPlayer?.State.ToString() ?? "untracked",
+			arenaPlayer?.CurrentArena?.Id.ToString() ?? "null",
+			player.Controller?.Team.ToString() ?? "null",
+			arenaPlayer?.IsAlive ?? false,
+			arenaPlayer?.IsWaiting ?? false
+		);
 
 		// ! Temporary debounce fix for double spawn on join
 		// ! In newer swiftly this might be fixed on framework side
