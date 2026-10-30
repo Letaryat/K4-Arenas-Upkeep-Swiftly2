@@ -955,6 +955,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (arenaPlayer.IsAfk)
 		{
 			arenaPlayer.SetWaiting();
+			_playerManager.EnqueueWaiting(arenaPlayer);
 			player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.afk_disabled"]}");
 			UpdatePlayerClantag(arenaPlayer);
 		}
