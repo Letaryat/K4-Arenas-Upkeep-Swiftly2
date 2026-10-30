@@ -116,7 +116,7 @@ public sealed partial class Plugin
 			var tracking = controller.ActionTrackingServices;
 			if (tracking != null)
 			{
-				tracking.MatchStats.Damage = arenaScore + 150;
+				tracking.MatchStats.Damage = arenaScore + 300;
 				controller.ActionTrackingServicesUpdated();
 			}
 		}
