@@ -1,3 +1,4 @@
+using K4Arenas.Services;
 using K4ArenaSharedApi;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +19,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6.3", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.2", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -38,6 +39,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private ArenaManager _arenaManager = null!;
 	private DatabaseService _databaseService = null!;
 	private MapServices _mapServices = null!;
+	private DuelService _duelService = null!;
+	private AutoBotFill _autoBotFillService = null!;
 	private CancellationTokenSource? _warmupTimerCts;
 	private CancellationTokenSource? _clantagTimerCts;
 	private Guid? _jointeamHookGuid;
@@ -120,6 +123,25 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_arenaManager = new ArenaManager(_playerManager);
 		_databaseService = new DatabaseService(Config.CurrentValue.DatabaseConnection, Config.CurrentValue.DatabasePurgeDays);
 		_mapServices = new MapServices();
+		_duelService = new DuelService();
+		//_autoBotFillService = new AutoBotFillService();
+
+		if (Config.CurrentValue.EnableAutoBotFill)
+		{
+			_autoBotFillService = new AutoBotFill(
+				Core,
+				_playerManager,
+				_arenaManager,
+				TerminateRoundIfPossible
+			);
+
+			Core.Logger.LogInformation("[K4-Arenas] AutoBotFill enabled.");
+		}
+		else
+		{
+			Core.Logger.LogInformation("[K4-Arenas] AutoBotFill disabled.");
+		}
+
 
 		Task.Run(async () =>
 		{
@@ -182,6 +204,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.RoundsCommands, OnRoundsCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.QueueCommands, OnQueueCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.AfkCommands, OnAfkCommand);
+		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelCommands, OnDuelCommand);
 	}
 
 	private static void RegisterCommandWithAliases(List<string> commands, ICommandService.CommandListener handler)
@@ -248,7 +271,12 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			{
 				ApplyGameConfig();
 			}
-
+			/*
+			if (Config.CurrentValue.EnableAutoBotFillService)
+			{
+				Core.Scheduler.RepeatBySeconds(5f, () => _autoBotFillService.Tick());
+			}
+			*/
 			// Check for common issues
 			CheckCommonProblems();
 
@@ -937,6 +965,14 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.afk_enabled", Config.CurrentValue.Commands.AfkCommands.FirstOrDefault() ?? "afk"]}");
 			UpdatePlayerClantag(arenaPlayer);
 		}
+	}
+
+	private void OnDuelCommand(ICommandContext ctx)
+	{
+		if (_duelService == null)
+			return;
+
+		_ = _duelService.HandleCommand(ctx) ? 0 : 0;
 	}
 
 	#endregion

@@ -63,3 +63,5 @@ obj/
 
 # Ignore any file or folder ending with `.local`
 **/*.local
+
+testignore

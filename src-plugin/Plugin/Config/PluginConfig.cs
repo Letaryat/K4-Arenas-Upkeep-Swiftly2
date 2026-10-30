@@ -19,6 +19,12 @@ public sealed partial class Plugin
 		/// <summary>Command settings</summary>
 		public CommandSettings Commands { get; set; } = new();
 
+		/// <summary>Enable duel service</summary>
+		public bool EnableDuelService { get; set; } = true;
+
+		/// <summary>Enable bot-fill service for odd player counts</summary>
+		public bool EnableAutoBotFill { get; set; } = false;
+
 		/// <summary>Compatibility and behavior settings</summary>
 		public CompatibilitySettings Compatibility { get; set; } = new();
 	}
@@ -39,6 +45,9 @@ public sealed partial class Plugin
 
 		/// <summary>Commands to toggle AFK</summary>
 		public List<string> AfkCommands { get; set; } = ["afk"];
+
+		/// <summary>Commands to open duel menu</summary>
+		public List<string> DuelCommands { get; set; } = ["duel"];
 	}
 
 	/// <summary>
