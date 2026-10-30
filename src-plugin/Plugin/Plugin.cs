@@ -18,7 +18,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6.2", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.1.6.6.3", Name = "K4 - Arenas", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -434,32 +434,44 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
 		var userId = @event.UserId; // skopiuj teraz, nie używaj @event w lambdzie
-
-		Core.Scheduler.NextWorldUpdate(() =>
-		{
-			try
-			{
-				var player = Core.PlayerManager.GetPlayer(userId);
-				if (player?.IsValid != true)
-					return;
-
-				if (_playerManager.HasPlayer(player))
-					return;
-
-				SetupPlayer(player);
-
-				if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
-					TerminateRoundIfPossible();
-			}
-			catch (Exception ex)
-			{
-				Core.Logger.LogError(ex, "OnPlayerActivate (deferred) failed for UserId {UserId}", userId);
-			}
-		});
-
+		Core.Scheduler.NextWorldUpdate(() => SetupActivatedPlayer(userId, 0));
 		return HookResult.Continue;
 	}
 
+
+	private void SetupActivatedPlayer(int userId, int attempt)
+	{
+		try
+		{
+			var player = Core.PlayerManager.GetPlayer(userId);
+			if (player == null || _playerManager.HasPlayer(player))
+				return;
+
+			if (!player.IsValid)
+			{
+				// IsValid wymaga ważnego pawna, którego świeżo dołączony gracz jeszcze
+				// może nie mieć. Ponów próbę zamiast porzucać gracza na zawsze.
+				if (attempt < 30)
+					Core.Scheduler.DelayBySeconds(0.5f, () => SetupActivatedPlayer(userId, attempt + 1));
+				else
+					Core.Logger.LogWarning("OnPlayerActivate: UserId {UserId} nie stał się ważny po {Attempts} próbach", userId, attempt);
+				return;
+			}
+
+			SetupPlayer(player);
+
+			if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false && !player.IsFakeClient)
+				TerminateRoundIfPossible();
+		}
+		catch (ObjectDisposedException)
+		{
+			// gracz rozłączył się w międzyczasie
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError(ex, "OnPlayerActivate (deferred) failed for UserId {UserId}", userId);
+		}
+	}
 
 	private HookResult OnClientDisconnected(EventPlayerDisconnect @event)
 	{
@@ -569,9 +581,11 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			return HookResult.Continue;
 		}
 
+		Core.Logger.LogInformation("[diag] spawn without arena -> spectator, state={State}", arenaPlayer?.State.ToString() ?? "untracked");
+
 		// ! Temporary debounce fix for double spawn on join
 		// ! In newer swiftly this might be fixed on framework side
-		arenaPlayer.PendingSetupCts?.Cancel();
+		arenaPlayer!.PendingSetupCts?.Cancel();
 		arenaPlayer.PendingSetupCts = Core.Scheduler.Delay(1, () =>
 		{
 			if (arenaPlayer.PendingSetupCts?.IsCancellationRequested == true || !arenaPlayer.IsValid)
@@ -1221,7 +1235,16 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			if (!hasRealPlayers && !isAloneOnServer)
 				return;
 
-			if (isAloneOnServer || _arenaManager.AllArenasFinished() || ShouldTerminateForWaitingPlayers())
+			// Lone human: only force a restart if they are NOT already playing in an active arena
+			// (i.e. they still need placing). With bot_quota the lone human is alone among
+			// *real* players for the whole session, so without this every bot death in any
+			// arena would force a new round.
+			var loneHumanAlreadyPlaying = isAloneOnServer &&
+				_arenaManager.Arenas.Any(a => a.IsActive && a.HasRealPlayers);
+
+			if ((isAloneOnServer && !loneHumanAlreadyPlaying)
+				|| _arenaManager.AllArenasFinished()
+				|| ShouldTerminateForWaitingPlayers())
 			{
 				_arenaManager.IsBetweenRounds = true;
 
@@ -1231,10 +1254,16 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 					{
 						var liveGameRules = Core.EntitySystem.GetGameRules();
 						if (liveGameRules == null)
+						{
+							_arenaManager.IsBetweenRounds = false;
 							return;
+						}
 
 						if (Core.Game.MatchData.Phase == GamePhase.GAMEPHASE_MATCH_ENDED || liveGameRules.WarmupPeriod == true)
+						{
+							_arenaManager.IsBetweenRounds = false;
 							return;
+						}
 
 						var tCount = 0;
 						var ctCount = 0;

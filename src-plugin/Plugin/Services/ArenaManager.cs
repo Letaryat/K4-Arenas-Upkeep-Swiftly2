@@ -158,6 +158,7 @@ public sealed partial class Plugin
 			}
 
 			AssignPlayersToArenas(activePlayers);
+			LogAssignmentDiagnostics(rankedPlayers);
 
 			// keep afk players afk
 			foreach (var afkPlayer in afkPlayers)
@@ -314,14 +315,35 @@ public sealed partial class Plugin
 			}
 
 			// add waiting players not already ranked (real players first)
-			var rankedIds = new HashSet<ulong>(ranked.Count);
+			var rankedIds = new HashSet<int>(ranked.Count);
 			for (var i = 0; i < ranked.Count; i++)
-				rankedIds.Add(ranked[i].SteamId);
+				rankedIds.Add(ranked[i].PlayerId);
 
+			var waitingNew = new List<ArenaPlayer>();
 			foreach (var player in _playerManager.GetWaitingPlayersOrdered())
 			{
-				if (!rankedIds.Contains(player.SteamId))
-					ranked.Add(player);
+				if (!rankedIds.Contains(player.PlayerId))
+					waitingNew.Add(player);
+			}
+			// 1v1 slots available (warmup arena Id < 0 is excluded)
+			var capacity = Arenas.Count(a => a.Id >= 0) * 2;
+
+			if (waitingNew.Count > 0 && ranked.Count + waitingNew.Count > capacity)
+			{
+				// Not everyone fits: bench the losers, let waiting players in.
+				// Without this the same two players are picked every round and the
+				// waiting player is starved forever.
+				var loserIds = new HashSet<int>(losers.Select(p => p.PlayerId));
+				var keep = ranked.Where(p => !loserIds.Contains(p.PlayerId)).ToList();
+				var benched = ranked.Where(p => loserIds.Contains(p.PlayerId)).ToList();
+
+				ranked = keep;
+				ranked.AddRange(waitingNew);
+				ranked.AddRange(benched);
+			}
+			else
+			{
+				ranked.AddRange(waitingNew);
 			}
 
 			return ranked;
@@ -511,7 +533,7 @@ public sealed partial class Plugin
 
 			foreach (var player in players)
 			{
-				if (player.IsValid && !target.Any(p => p.SteamId == player.SteamId))
+				if (player.IsValid && !target.Any(p => p.PlayerId == player.PlayerId))
 					target.Add(player);
 			}
 		}
@@ -524,6 +546,22 @@ public sealed partial class Plugin
 				n--;
 				var k = Random.Shared.Next(n + 1);
 				(Arenas[k], Arenas[n]) = (Arenas[n], Arenas[k]);
+			}
+		}
+
+		private void LogAssignmentDiagnostics(List<ArenaPlayer> ranked)
+		{
+			foreach (var p in _playerManager.GetAllPlayers())
+			{
+				try
+				{
+					Core.Logger.LogInformation(
+						"[diag] id={Id} steam={Steam} bot={Bot} valid={Valid} state={State} afk={Afk} inRanked={InRanked} arena={Arena}",
+						p.PlayerId, p.SteamId, p.Player.IsFakeClient, p.IsValid, p.State, p.IsAfk,
+						ranked.Any(r => r.PlayerId == p.PlayerId),
+						p.CurrentArena?.Id.ToString() ?? "none");
+				}
+				catch (ObjectDisposedException) { }
 			}
 		}
 	}

@@ -20,6 +20,8 @@ public sealed partial class Plugin
 
 		/// <summary>Steam ID (stays the same even if IPlayer changes)</summary>
 		public ulong SteamId { get; }
+		/// <summary>Unique per connected client. Bots share SteamId 0 - never use SteamId as identity.</summary>
+		public int PlayerId { get; }
 
 		/// <summary>Current arena system state</summary>
 		public PlayerState State { get; set; } = PlayerState.Waiting;
@@ -63,7 +65,8 @@ public sealed partial class Plugin
 		{
 			Player = player;
 			SteamId = player.SteamID;
-
+			PlayerId = player.PlayerID;
+			
 			// start with all default rounds enabled
 			foreach (var roundType in RoundTypes.All.Where(r => r.EnabledByDefault))
 			{
