@@ -120,8 +120,8 @@ public sealed partial class Plugin
 						duel.TotalRounds);
 
 
-						_refreshClantag(challenger);
-						_refreshClantag(opponent);
+					_refreshClantag(challenger);
+					_refreshClantag(opponent);
 
 
 
@@ -644,7 +644,7 @@ public sealed partial class Plugin
 				.Design.SetGlobalScrollStyle(MenuOptionScrollStyle.LinearScroll)
 				.SetPlayerFrozen(false);
 
-			foreach (var selectedRounds in new[] { 1, 3, 5, 8 })
+			foreach (var selectedRounds in Config.CurrentValue.DuelBORounds.Where(r => r > 0).Distinct().OrderBy(r => r))
 			{
 				var option = new ButtonMenuOption($"Rounds: {selectedRounds}");
 				option.Click += (_, _) =>
@@ -677,7 +677,12 @@ public sealed partial class Plugin
 				return;
 			}
 
-			if (rounds is not (1 or 3 or 5))
+			var availableRounds = Config.CurrentValue.DuelBORounds?
+				.Where(r => r > 0)
+				.Distinct()
+				.ToList() ?? [];
+
+			if (!availableRounds.Contains(rounds))
 				return;
 
 			var challengerPlayer = GetWaitingDuelPlayer(challenger);
@@ -757,7 +762,7 @@ public sealed partial class Plugin
 			duel.Opponent.SendChat(
 				$"{opponentLocalizer["k4.general.prefix"]} Duel started vs {challengerName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
 
-			
+
 
 		}
 
@@ -901,36 +906,6 @@ public sealed partial class Plugin
 				"[Duel] Pending challenge {DuelId} cancelled.",
 				duel.Id);
 		}
-	
-	private void UpdatePlayerClantag(ArenaPlayer arenaPlayer)
-	{
-		if (!arenaPlayer.IsValid || Config.CurrentValue.Compatibility.DisableClantags)
-			return;
-
-		// Defer to next world update so the engine's network state machine
-		// picks up the schema field change and broadcasts it to all clients.
-		Core.Scheduler.NextTick(() =>
-		{
-			if (!arenaPlayer.IsValid)
-				return;
-
-			var controller = arenaPlayer.Player.Controller;
-			if (controller == null)
-				return;
-
-			var newTag = arenaPlayer.CurrentArena?.IsDuelArena == true
-				? "CHALLENGE"
-				: arenaPlayer.GetClanTag();
-			if (controller.Clan == newTag)
-				return;
-
-			controller.Clan = newTag;
-			controller.ClanUpdated();
-			if (Core.GameEvent.IsListeningToEvent<EventNextlevelChanged>(arenaPlayer.Player.PlayerID))
-				Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(arenaPlayer.Player.PlayerID);
-		});
-	}
-
 
 	}
 
@@ -946,7 +921,7 @@ public sealed partial class Plugin
 			Challenger = challenger;
 			Opponent = opponent;
 			WeaponType = weaponType;
-			TotalRounds = Math.Clamp(totalRounds, 1, 5);
+			TotalRounds = totalRounds;
 		}
 
 		public int Id { get; }

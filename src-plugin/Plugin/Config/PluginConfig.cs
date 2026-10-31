@@ -21,6 +21,7 @@ public sealed partial class Plugin
 
 		/// <summary>Enable duel service</summary>
 		public bool EnableDuelService { get; set; } = true;
+		public List<int> DuelBORounds { get; set; } = [1, 2, 3, 4, 5, 6, 7, 8];
 
 		/// <summary>Enable bot-fill service for odd player counts</summary>
 		public bool EnableAutoBotFill { get; set; } = false;

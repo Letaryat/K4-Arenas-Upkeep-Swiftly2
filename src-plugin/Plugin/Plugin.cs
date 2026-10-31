@@ -1194,7 +1194,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			if (controller == null)
 				return;
 
-			var newTag = arenaPlayer.GetClanTag();
+			var newTag = arenaPlayer.CurrentArena?.IsDuelArena == true
+				? "CHALLENGE"
+				: arenaPlayer.GetClanTag();
 			if (controller.Clan == newTag)
 				return;
 
