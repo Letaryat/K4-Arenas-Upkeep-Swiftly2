@@ -83,7 +83,7 @@ public sealed partial class Plugin
 		/// Processes end of round - determines results and sets up next round matchmaking.
 		/// This is where the ladder magic happens.
 		/// </summary>
-		public void ProcessRoundEnd()
+		public void ProcessRoundEnd(Func<List<ArenaPlayer>, HashSet<ArenaPlayer>>? assignPendingChallenges = null)
 		{
 			var winners = new List<ArenaPlayer>();
 			var losers = new List<ArenaPlayer>();
@@ -91,6 +91,9 @@ public sealed partial class Plugin
 			// process each arena result
 			foreach (var arena in Arenas.OrderBy(a => a.Id < 0).ThenBy(a => Math.Abs(a.Id)))
 			{
+				if (arena.IsDuelArena)
+					continue;
+
 				if (arena.Id == -1)
 				{
 					AddValidPlayers(arena.Team1Players, losers);
@@ -125,6 +128,9 @@ public sealed partial class Plugin
 			// clear arenas for next round
 			foreach (var arena in Arenas)
 			{
+				if (arena.IsDuelArena)
+					continue;
+
 				arena.Clear();
 			}
 
@@ -150,17 +156,25 @@ public sealed partial class Plugin
 			// real players before bots
 			activePlayers.Sort((a, b) => a.Player.IsFakeClient.CompareTo(b.Player.IsFakeClient));
 
-			// rebuild waiting queue
+			var challengePlayers = assignPendingChallenges?.Invoke(activePlayers)
+								   ?? new HashSet<ArenaPlayer>();
+
+			var remainingPlayers = activePlayers
+				.Where(p => !challengePlayers.Contains(p))
+				.ToList();
+
+			// Rebuild waiting queue without Challenge participants.
 			_playerManager.ClearWaitingQueue();
-			foreach (var player in activePlayers)
+
+			foreach (var player in remainingPlayers)
 			{
 				_playerManager.EnqueueWaiting(player);
 			}
 
-			AssignPlayersToArenas(activePlayers);
+			AssignPlayersToArenas(remainingPlayers);
 			LogAssignmentDiagnostics(rankedPlayers);
 
-			// keep afk players afk
+			// Keep afk players afk.
 			foreach (var afkPlayer in afkPlayers)
 			{
 				afkPlayer.SetAfk();
@@ -176,14 +190,14 @@ public sealed partial class Plugin
 		{
 			var waitingPlayers = _playerManager.GetWaitingPlayersOrdered();
 			var waitingRealPlayers = waitingPlayers.Where(p => !p.Player.IsFakeClient).ToList();
-			var emptyArenas = Arenas.Count(a => a.IsEmpty);
+			var emptyArenas = Arenas.Count(a => !a.IsDuelArena && a.IsEmpty);
 
 			// If real players are waiting but no empty arenas, kick bots from bot-only arenas
 			if (waitingRealPlayers.Count > 0 && emptyArenas == 0)
 			{
 				foreach (var arena in Arenas)
 				{
-					if (arena.IsEmpty)
+					if (arena.IsDuelArena || arena.IsEmpty)
 						continue;
 
 					// Check if arena has only bots
@@ -215,6 +229,9 @@ public sealed partial class Plugin
 			// First fill arenas that need opponents
 			foreach (var arena in Arenas)
 			{
+				if (arena.IsDuelArena)
+					continue;
+
 				if (arena.Team1SteamIds.Count > 0 && arena.Team2SteamIds.Count == 0)
 				{
 					var player2 = DequeueValidWaitingPlayer();
@@ -234,7 +251,7 @@ public sealed partial class Plugin
 
 			foreach (var arena in Arenas)
 			{
-				if (!arena.IsEmpty)
+				if (arena.IsDuelArena || !arena.IsEmpty)
 					continue;
 
 				var player1 = DequeueValidWaitingPlayer();
@@ -270,6 +287,51 @@ public sealed partial class Plugin
 				return;
 
 			player.Player.Respawn();
+		}
+
+		/// <summary>
+		/// Immediately prepares a player for a duel. Alive players are teleported and
+		/// configured directly; dead players are respawned so the existing spawn event
+		/// performs their setup exactly once.
+		/// </summary>
+		public bool TrySetupDuelPlayer(ArenaPlayer player)
+		{
+			if (player.CurrentArena == null || player.SpawnLocation == null || !IsSafeToRespawn(player))
+				return false;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn?.LifeState == (byte)LifeState_t.LIFE_ALIVE)
+			{
+				player.CurrentArena.SetupPlayer(player);
+				return true;
+			}
+
+			RespawnPlayer(player);
+			return true;
+		}
+
+		/// <summary>Restores a player to a valid waiting state after a failed duel start.</summary>
+		public void RestoreWaitingPlayer(ArenaPlayer player)
+		{
+			player.SetWaiting();
+			_playerManager.EnqueueWaiting(player);
+
+			if (!player.IsValid)
+				return;
+
+			var controller = player.Player.Controller;
+			if (controller == null || !controller.IsValid || controller.Team <= Team.Spectator)
+				return;
+
+			player.PlayerIsSafe = true;
+			try
+			{
+				player.Player.ChangeTeam(Team.Spectator);
+			}
+			finally
+			{
+				player.PlayerIsSafe = false;
+			}
 		}
 
 		/// <summary>Sets up player that just spawned in their arena</summary>
@@ -325,8 +387,8 @@ public sealed partial class Plugin
 				if (!rankedIds.Contains(player.PlayerId))
 					waitingNew.Add(player);
 			}
-			// 1v1 slots available (warmup arena Id < 0 is excluded)
-			var capacity = Arenas.Count(a => a.Id >= 0) * 2;
+			// 1v1 slots available (warmup arena Id < 0 and duel arenas are excluded)
+			var capacity = Arenas.Count(a => !a.IsDuelArena && a.Id >= 0) * 2;
 
 			if (waitingNew.Count > 0 && ranked.Count + waitingNew.Count > capacity)
 			{
@@ -363,6 +425,9 @@ public sealed partial class Plugin
 			for (var arenaIndex = 0; arenaIndex < Arenas.Count; arenaIndex++)
 			{
 				var arena = Arenas[arenaIndex];
+
+				if (arena.IsDuelArena)
+					continue;
 
 				// try team modes first
 				if (hasTeamRoundTypes)

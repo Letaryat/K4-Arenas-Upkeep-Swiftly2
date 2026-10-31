@@ -23,6 +23,12 @@ public sealed partial class Plugin
 		/// <summary>Arena ID (0-based, -1 for warmup)</summary>
 		public int Id { get; private set; } = -1;
 
+		/// <summary>Active duel reservation, if any</summary>
+		public int? DuelId { get; private set; }
+
+		/// <summary>True if this arena is reserved for a duel</summary>
+		public bool IsDuelArena => DuelId.HasValue;
+
 		/// <summary>Current arena score/rank</summary>
 		public int Score { get; private set; }
 
@@ -80,6 +86,24 @@ public sealed partial class Plugin
 
 		/// <summary>True if no players at all</summary>
 		public bool IsEmpty => Team1SteamIds.Count == 0 && Team2SteamIds.Count == 0;
+
+		/// <summary>True if the arena is empty and not reserved for a duel</summary>
+		public bool IsFreeForDuel => IsEmpty && !IsDuelArena;
+
+		/// <summary>Reserves the arena for a duel</summary>
+		public void ReserveForDuel(int duelId)
+		{
+			if (IsDuelArena)
+				return;
+
+			DuelId = duelId;
+		}
+
+		/// <summary>Releases the duel reservation</summary>
+		public void ReleaseDuel()
+		{
+			DuelId = null;
+		}
 
 		/// <summary>
 		/// Sets up a regular match with two teams

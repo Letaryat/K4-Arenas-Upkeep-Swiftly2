@@ -47,6 +47,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private CancellationTokenSource? _warmupCts;
 	private bool _mapActive;
+	private bool _pluginTerminatedRound;
 
 
 	public override void Load(bool hotReload)
@@ -75,6 +76,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	public override void Unload()
 	{
+		_duelService?.Clear();
 		_arenaManager?.Shutdown();
 		_playerManager?.Clear();
 
@@ -123,7 +125,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_arenaManager = new ArenaManager(_playerManager);
 		_databaseService = new DatabaseService(Config.CurrentValue.DatabaseConnection, Config.CurrentValue.DatabasePurgeDays);
 		_mapServices = new MapServices();
-		_duelService = new DuelService();
+		_duelService = new DuelService(_playerManager, _arenaManager, UpdatePlayerClantag);
 		//_autoBotFillService = new AutoBotFillService();
 
 		if (Config.CurrentValue.EnableAutoBotFill)
@@ -453,10 +455,12 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private void OnMapUnload(IOnMapUnloadEvent @event)
 	{
 		_mapActive = false;
+		_pluginTerminatedRound = false;
 
 		_warmupCts?.Cancel();
 		_warmupCts = null;
 
+		_duelService.Clear();
 		_playerManager.Clear();
 		_arenaManager.Shutdown();
 	}
@@ -508,6 +512,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (@event.Reason == (short)ENetworkDisconnectionReason.NETWORK_DISCONNECT_SHUTDOWN)
 			return HookResult.Continue;
 
+		_duelService.HandlePlayerDisconnect(@event.UserId);
+
 		var player = Core.PlayerManager.GetPlayer(@event.UserId);
 		if (player != null)
 		{
@@ -529,14 +535,17 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
 			return HookResult.Continue;
 
-		_arenaManager.ProcessRoundEnd();
+		_arenaManager.ProcessRoundEnd(_duelService.AssignPendingChallenges);
 		RefreshAllClantags();
+
 		return HookResult.Continue;
 	}
 
 	private HookResult OnRoundStart(EventRoundStart ev)
 	{
 		_arenaManager.IsBetweenRounds = false;
+		_pluginTerminatedRound = false;
+		_duelService.HandleRoundStart();
 
 		// Remind AFK players
 		if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false)
@@ -553,6 +562,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			// Call special round OnRoundStart callbacks
 			foreach (var arena in _arenaManager.Arenas)
 			{
+				if (arena.IsDuelArena)
+					continue;
+
 				if (arena.CurrentRoundType?.IsSpecialRound == true && arena.CurrentRoundType.OnRoundStart != null)
 				{
 					var team1Players = arena.Team1Players.Where(p => p.IsValid).Select(p => p.Player).ToList();
@@ -568,9 +580,13 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private HookResult OnRoundEnd(EventRoundEnd ev)
 	{
 		_arenaManager.IsBetweenRounds = true;
+		_duelService.HandleRoundEnd(ev, _pluginTerminatedRound);
 
 		foreach (var arena in _arenaManager.Arenas)
 		{
+			if (arena.IsDuelArena)
+				continue;
+
 			arena.DetermineResult();
 
 			// Call special round OnRoundEnd callbacks
@@ -691,6 +707,12 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 				arenaPlayer.SetWaiting();
 				player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.afk_disabled"]}");
 				UpdatePlayerClantag(arenaPlayer);
+			}
+
+			if (oldTeam > Team.Spectator && newTeam == Team.Spectator)
+			{
+				var playerId = player.PlayerID;
+				Core.Scheduler.NextWorldUpdate(() => _duelService.HandlePlayerAfk(playerId));
 			}
 
 			// Only check round termination when a player leaves a playing team.
@@ -955,6 +977,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		else
 		{
 			arenaPlayer.SetAfk();
+			_duelService.HandlePlayerAfk(player.PlayerID);
 			player.ChangeTeam(Team.Spectator);
 			player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.afk_enabled", Config.CurrentValue.Commands.AfkCommands.FirstOrDefault() ?? "afk"]}");
 			UpdatePlayerClantag(arenaPlayer);
@@ -1329,6 +1352,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 								? (Random.Shared.Next(2) == 0 ? RoundEndReason.CTsWin : RoundEndReason.TerroristsWin)
 								: RoundEndReason.RoundDraw;
 
+						_pluginTerminatedRound = true;
 						liveGameRules.TerminateRound(reason, delay);
 					}
 					catch (Exception ex)
