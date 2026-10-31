@@ -768,7 +768,6 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (player == null || !player.IsValid || player.IsFakeClient)
 			return HookResult.Continue;
 
-		// Only process jointeam commands
 		if (!commandLine.StartsWith("jointeam", StringComparison.OrdinalIgnoreCase))
 			return HookResult.Continue;
 
@@ -776,17 +775,11 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (arenaPlayer == null)
 			return HookResult.Continue;
 
-		// Allow if player is marked safe (transitioning between arenas)
 		if (arenaPlayer.PlayerIsSafe)
 			return HookResult.Continue;
 
 		var currentTeam = player.Controller?.TeamNum ?? 0;
 
-		// Player is currently in spectator and wants to join a playing team.
-		// Treat this as a "return from spectator" request: put them in the waiting
-		// queue (disable AFK if needed) but keep them in spectator until the next
-		// round assignment. Letting them actually spawn without an arena assignment
-		// would immediately bounce them back, which is confusing.
 		if (currentTeam <= (int)Team.Spectator)
 		{
 			var parts2 = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
