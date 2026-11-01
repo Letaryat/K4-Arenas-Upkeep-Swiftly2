@@ -16,6 +16,7 @@ public sealed partial class Plugin
 	{
 		private readonly ConcurrentDictionary<int, DuelMatch> _activeDuels = new();
 		private readonly ConcurrentDictionary<int, DuelMatch> _pendingDuels = new();
+		private readonly ConcurrentDictionary<int, DuelInvitation> _challengeRequests = new();
 		private readonly PlayerManager _playerManager;
 		private readonly ArenaManager _arenaManager;
 		private readonly Action<ArenaPlayer> _refreshClantag;
@@ -38,13 +39,106 @@ public sealed partial class Plugin
 			if (!IsEnabled)
 			{
 				var localizer = Core.Translation.GetPlayerLocalizer(sender);
-				sender.SendChat($"{localizer["k4.general.prefix"]} Duel service is disabled.");
+				sender.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.disabled"]}");
 				return true;
 			}
 
 			OpenOpponentMenu(sender);
 			return true;
 		}
+
+		public bool HandleAcceptCommand(ICommandContext ctx)
+		{
+			var sender = ctx.Sender;
+
+			if (sender == null || !sender.IsValid || sender.IsFakeClient)
+				return true;
+
+			var localizer = Core.Translation.GetPlayerLocalizer(sender);
+
+			if (!IsEnabled)
+			{
+				sender.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.disabled"]}");
+				return true;
+			}
+
+			var request = _challengeRequests.Values.FirstOrDefault(r =>
+				r.Duel.Opponent.PlayerID == sender.PlayerID);
+
+			if (request == null)
+			{
+				sender.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.norequest"]}");
+				return true;
+			}
+
+			if (DateTime.UtcNow >= request.ExpiresAtUtc)
+			{
+				ExpireChallenge(request);
+				sender.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.expiredrequest"]}");
+				return true;
+			}
+
+			AcceptChallenge(request);
+
+			return true;
+		}
+
+		public bool HandleCancelCommand(ICommandContext ctx)
+		{
+			var sender = ctx.Sender;
+
+			if (sender == null || !sender.IsValid || sender.IsFakeClient)
+				return true;
+
+			var localizer = Core.Translation.GetPlayerLocalizer(sender);
+
+			var request = _challengeRequests.Values.FirstOrDefault(r =>
+				r.Duel.Challenger.PlayerID == sender.PlayerID ||
+				r.Duel.Opponent.PlayerID == sender.PlayerID);
+
+			if (request == null)
+			{
+				sender.SendChat(
+					$"{localizer["k4.general.prefix"]} {localizer["k4.duels.norequest"]}");
+				return true;
+			}
+
+			var duel = request.Duel;
+
+			if (!_challengeRequests.TryRemove(duel.Id, out _))
+				return true;
+
+			try
+			{
+				request.Cancellation.Cancel();
+			}
+			catch (ObjectDisposedException)
+			{
+			}
+
+			var isChallenger = duel.Challenger.PlayerID == sender.PlayerID;
+
+			var otherPlayer = isChallenger ? duel.Opponent : duel.Challenger;
+
+			sender.SendChat(
+				$"{localizer["k4.general.prefix"]} {localizer["k4.duels.cancel"]}");
+
+			if (otherPlayer.IsValid)
+			{
+				var otherLocalizer = Core.Translation.GetPlayerLocalizer(otherPlayer);
+
+				otherPlayer.SendChat(
+					$"{otherLocalizer["k4.general.prefix"]} {localizer["k4.duels.cancelnotification", sender.Controller?.PlayerName ?? "Player"]}");
+			}
+
+			Core.Logger.LogInformation(
+				"[Duel] Challenge {DuelId} cancelled by player {PlayerId}.",
+				duel.Id,
+				sender.PlayerID);
+
+			return true;
+		}
+
 
 		public DuelMatch? GetActiveDuel(IPlayer player)
 		{
@@ -60,9 +154,14 @@ public sealed partial class Plugin
 			if (GetActiveDuel(player) != null)
 				return true;
 
-			return _pendingDuels.Values.Any(duel =>
+			if (_pendingDuels.Values.Any(duel =>
 				duel.Challenger.PlayerID == player.PlayerID ||
-				duel.Opponent.PlayerID == player.PlayerID);
+				duel.Opponent.PlayerID == player.PlayerID))
+				return true;
+
+			return _challengeRequests.Values.Any(request =>
+				request.Duel.Challenger.PlayerID == player.PlayerID ||
+				request.Duel.Opponent.PlayerID == player.PlayerID);
 		}
 
 		public void HandleRoundStart()
@@ -78,7 +177,7 @@ public sealed partial class Plugin
 
 					if (arena == null || arena.DuelId != duel.Id)
 					{
-						AbortDuel(duel, -1, "Duel aborted: its arena is no longer available.");
+						AbortDuel(duel, -1, "k4.duels.nofreearena");
 						continue;
 					}
 
@@ -87,29 +186,32 @@ public sealed partial class Plugin
 
 					if (challenger == null || !challenger.IsValid)
 					{
-						AbortDuel(duel, duel.Challenger.PlayerID, "Duel aborted: a player is no longer available.");
+						AbortDuel(duel, duel.Challenger.PlayerID, "k4.duels.playernotavailable");
 						continue;
 					}
 
 					if (opponent == null || !opponent.IsValid)
 					{
-						AbortDuel(duel, duel.Opponent.PlayerID, "Duel aborted: a player is no longer available.");
+						AbortDuel(duel, duel.Opponent.PlayerID, "k4.duels.playernotavailable");
 						continue;
 					}
 
 					if (!_arenaManager.TrySetupDuelPlayer(challenger))
 					{
-						AbortDuel(duel, duel.Challenger.PlayerID, "Duel aborted: a player could not be prepared.");
+						AbortDuel(duel, duel.Challenger.PlayerID, "k4.duels.playernotavailable");
 						continue;
 					}
 
 					if (!_arenaManager.TrySetupDuelPlayer(opponent))
 					{
-						AbortDuel(duel, duel.Opponent.PlayerID, "Duel aborted: a player could not be prepared.");
+						AbortDuel(duel, duel.Opponent.PlayerID, "k4.duels.playernotavailable");
 						continue;
 					}
 
 					duel.MarkStarted();
+
+					challenger.CurrentArena?.SendArenaMessage(challenger);
+					opponent.CurrentArena?.SendArenaMessage(opponent);
 
 					Core.Logger.LogInformation(
 						"[Duel] Duel {DuelId} started. Challenger: {ChallengerId}, Opponent: {OpponentId}, Weapon: {WeaponType}, BO{Rounds}.",
@@ -125,7 +227,7 @@ public sealed partial class Plugin
 
 
 
-					SendDuelStartedMessages(duel);
+					//SendDuelStartedMessages(duel);
 				}
 
 				duel.ResetRoundResult();
@@ -152,6 +254,7 @@ public sealed partial class Plugin
 				if (!TryDetermineRoundResult(duel, arena, reason, winningTeam, pluginTerminatedRound, out var winner))
 					continue;
 
+				duel.StartMessageSent = false;
 				duel.AwardRound(winner);
 
 				if (duel.IsFinished)
@@ -161,9 +264,24 @@ public sealed partial class Plugin
 
 		public void HandlePlayerDisconnect(int playerId)
 		{
+			var request = _challengeRequests.Values.FirstOrDefault(r =>
+				r.Duel.Challenger.PlayerID == playerId ||
+				r.Duel.Opponent.PlayerID == playerId);
+
+			if (request != null)
+			{
+				CancelChallengeRequest(
+					request,
+					"k4.duels.opponentafk");
+
+				return;
+			}
+
 			var pendingDuel = _pendingDuels.Values.FirstOrDefault(d =>
 				d.Challenger.PlayerID == playerId ||
 				d.Opponent.PlayerID == playerId);
+
+
 
 			if (pendingDuel != null)
 			{
@@ -178,7 +296,7 @@ public sealed partial class Plugin
 						var localizer = Core.Translation.GetPlayerLocalizer(opponent);
 
 						opponent.SendChat(
-							$"{localizer["k4.general.prefix"]} Challenge cancelled: your opponent disconnected.");
+							$"{localizer["k4.general.prefix"]} {localizer["k4.duels.opponentleft"]}");
 					}
 				}
 
@@ -190,11 +308,25 @@ public sealed partial class Plugin
 				d.Opponent.PlayerID == playerId);
 
 			if (duel != null)
-				AbortDuel(duel, playerId, "Duel aborted: your opponent disconnected.");
+				AbortDuel(duel, playerId, "k4.duels.opponentleft");
 		}
 
 		public void HandlePlayerAfk(int playerId)
 		{
+
+			var request = _challengeRequests.Values.FirstOrDefault(r =>
+				r.Duel.Challenger.PlayerID == playerId ||
+				r.Duel.Opponent.PlayerID == playerId);
+
+			if (request != null)
+			{
+				CancelChallengeRequest(
+					request,
+					"k4.duels.opponentleftorafk");
+
+				return;
+			}
+
 			var pendingDuel = _pendingDuels.Values.FirstOrDefault(d =>
 				d.Challenger.PlayerID == playerId ||
 				d.Opponent.PlayerID == playerId);
@@ -212,7 +344,7 @@ public sealed partial class Plugin
 						var localizer = Core.Translation.GetPlayerLocalizer(opponent);
 
 						opponent.SendChat(
-							$"{localizer["k4.general.prefix"]} Challenge cancelled: your opponent became AFK.");
+							$"{localizer["k4.general.prefix"]} {localizer["k4.duels.opponentafk"]}");
 					}
 				}
 
@@ -224,11 +356,17 @@ public sealed partial class Plugin
 				d.Opponent.PlayerID == playerId);
 
 			if (duel != null)
-				AbortDuel(duel, playerId, "Duel aborted: your opponent became AFK.");
+				AbortDuel(duel, playerId, "k4.duels.opponentafk");
 		}
 
 		public void Clear()
 		{
+			foreach (var request in _challengeRequests.Values.ToList())
+			{
+				CancelChallengeRequest(request, "k4.duels.notavailablenow");
+			}
+
+			_pendingDuels.Clear();
 
 			foreach (var duel in _activeDuels.Values.ToList())
 			{
@@ -303,7 +441,7 @@ public sealed partial class Plugin
 			var participants = GetDuelParticipants(duel, arena);
 			var winner = duel.MatchWinner;
 			var winnerName = winner.Controller?.PlayerName ?? "Player";
-			var message = $"Duel finished: {winnerName} won {duel.ChallengerScore}-{duel.OpponentScore}.";
+			//var message = $"Duel finished: {winnerName} won {duel.ChallengerScore}-{duel.OpponentScore}.";
 
 			foreach (var participant in participants)
 			{
@@ -311,7 +449,7 @@ public sealed partial class Plugin
 					continue;
 
 				var localizer = Core.Translation.GetPlayerLocalizer(participant.Player);
-				participant.Player.SendChat($"{localizer["k4.general.prefix"]} {message}");
+				participant.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.duel.finished.allnotification", winnerName, duel.ChallengerScore, duel.OpponentScore]}");
 			}
 
 			CleanupDuel(duel, arena, participants, null);
@@ -334,7 +472,7 @@ public sealed partial class Plugin
 					continue;
 
 				var localizer = Core.Translation.GetPlayerLocalizer(participant.Player);
-				participant.Player.SendChat($"{localizer["k4.general.prefix"]} {message}");
+				participant.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer[message]}");
 			}
 
 			CleanupDuel(duel, arena, participants, unavailablePlayerId);
@@ -444,26 +582,6 @@ public sealed partial class Plugin
 			RoundEndReason.CTsReachedHostage or
 			RoundEndReason.SurvivalWin;
 
-		/*
-		private ArenaPlayer? GetWaitingDuelPlayer(IPlayer player)
-		{
-			if (player == null || !player.IsValid)
-				return null;
-
-			var controller = player.Controller;
-			if (controller == null || !controller.IsValid || controller.IsHLTV)
-				return null;
-
-			var arenaPlayer = _playerManager.GetPlayer(player);
-			if (arenaPlayer == null || !arenaPlayer.IsValid || !arenaPlayer.IsWaiting || arenaPlayer.IsAfk)
-				return null;
-
-			if (arenaPlayer.CurrentArena != null || IsParticipant(player))
-				return null;
-
-			return arenaPlayer;
-		}
-		*/
 		private ArenaPlayer? GetWaitingDuelPlayer(IPlayer player)
 		{
 			if (player == null)
@@ -510,27 +628,11 @@ public sealed partial class Plugin
 				return null;
 			}
 
-			/*
-			if (!arenaPlayer.IsWaiting)
-			{
-				Core.Logger.LogWarning("[Duel] Player {PlayerId}: not waiting.", player.PlayerID);
-				return null;
-			}
-			*/
-
 			if (arenaPlayer.IsAfk)
 			{
 				Core.Logger.LogWarning("[Duel] Player {PlayerId}: is AFK.", player.PlayerID);
 				return null;
 			}
-
-			/*
-			if (arenaPlayer.CurrentArena != null)
-			{
-				Core.Logger.LogWarning("[Duel] Player {PlayerId}: already has an arena.", player.PlayerID);
-				return null;
-			}
-			*/
 
 			if (IsParticipant(player))
 			{
@@ -557,13 +659,13 @@ public sealed partial class Plugin
 
 			if (players.Count == 0)
 			{
-				challenger.SendChat($"{localizer["k4.general.prefix"]} There is no valid opponent available.");
+				challenger.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.noopponentavailable"]}");
 				return;
 			}
 
 			var menuBuilder = Core.MenusAPI
 				.CreateBuilder()
-				.Design.SetMenuTitle("Duel - select opponent")
+				.Design.SetMenuTitle(localizer["k4.duelsmenu.opponents"])
 				.Design.SetMenuTitleVisible(true)
 				.Design.SetMenuFooterVisible(true)
 				.Design.SetGlobalScrollStyle(MenuOptionScrollStyle.LinearScroll)
@@ -598,7 +700,7 @@ public sealed partial class Plugin
 			var localizer = Core.Translation.GetPlayerLocalizer(challenger);
 			var menuBuilder = Core.MenusAPI
 				.CreateBuilder()
-				.Design.SetMenuTitle($"Duel vs {opponent.Controller?.PlayerName ?? "Player"}")
+				.Design.SetMenuTitle(localizer["k4.duelsmenu.weapontitle", opponent.Controller?.PlayerName ?? "Player"])
 				.Design.SetMenuTitleVisible(true)
 				.Design.SetMenuFooterVisible(true)
 				.Design.SetGlobalScrollStyle(MenuOptionScrollStyle.LinearScroll)
@@ -631,14 +733,15 @@ public sealed partial class Plugin
 
 			var menu = menuBuilder.Build();
 			Core.MenusAPI.OpenMenuForPlayer(challenger, menu);
-			challenger.SendChat($"{localizer["k4.general.prefix"]} Choose a weapon category for the duel.");
+			challenger.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.duels.selectWeapon"]}");
 		}
 
 		private void OpenRoundMenu(IPlayer challenger, IPlayer opponent, string weaponType)
 		{
+			var localizer = Core.Translation.GetPlayerLocalizer(challenger);
 			var menuBuilder = Core.MenusAPI
 				.CreateBuilder()
-				.Design.SetMenuTitle("Duel rounds")
+				.Design.SetMenuTitle(localizer["k4.duelsmenu.roundtitle"])
 				.Design.SetMenuTitleVisible(true)
 				.Design.SetMenuFooterVisible(true)
 				.Design.SetGlobalScrollStyle(MenuOptionScrollStyle.LinearScroll)
@@ -646,7 +749,7 @@ public sealed partial class Plugin
 
 			foreach (var selectedRounds in Config.CurrentValue.DuelBORounds.Where(r => r > 0).Distinct().OrderBy(r => r))
 			{
-				var option = new ButtonMenuOption($"Rounds: {selectedRounds}");
+				var option = new ButtonMenuOption(localizer["k4.duelsmenu.roundoption", selectedRounds.ToString().ToUpper()]);
 				option.Click += (_, _) =>
 				{
 					Core.Scheduler.NextTick(() =>
@@ -690,15 +793,10 @@ public sealed partial class Plugin
 
 			if (challengerPlayer == null || opponentPlayer == null)
 			{
-				Core.Logger.LogWarning(
-					"[Duel] Challenge rejected. Challenger: {ChallengerId}, Opponent: {OpponentId}.",
-					challenger.PlayerID,
-					opponent.PlayerID);
-
 				var localizer = Core.Translation.GetPlayerLocalizer(challenger);
 
 				challenger.SendChat(
-					$"{localizer["k4.general.prefix"]} One or both players are not available for a challenge.");
+					$"{localizer["k4.general.prefix"]} {localizer["k4.duels.playersnotavailable"]}");
 
 				return;
 			}
@@ -710,15 +808,34 @@ public sealed partial class Plugin
 				var localizer = Core.Translation.GetPlayerLocalizer(challenger);
 
 				challenger.SendChat(
-					$"{localizer["k4.general.prefix"]} Selected weapon mode is unavailable.");
+					$"{localizer["k4.general.prefix"]} {localizer["k4.duels.weaponnotavailable"]}");
 
 				return;
 			}
 
 			var duel = new DuelMatch(challenger, opponent, weaponType, rounds);
+			var request = new DuelInvitation(duel);
 
-			if (!_pendingDuels.TryAdd(duel.Id, duel))
+			if (!_challengeRequests.TryAdd(duel.Id, request))
 				return;
+
+			if (opponent.IsFakeClient)
+			{
+				if (!AcceptChallenge(request))
+				{
+					var localizer = Core.Translation.GetPlayerLocalizer(challenger);
+
+					challenger.SendChat(
+						$"{localizer["k4.general.prefix"]}{localizer["k4.duels.botnotavailable"]}");
+
+					Core.Logger.LogWarning(
+						"[Duel] Bot {BotId} failed to accept challenge {DuelId}.",
+						opponent.PlayerID,
+						duel.Id);
+				}
+
+				return;
+			}
 
 			var challengerLocalizer = Core.Translation.GetPlayerLocalizer(challenger);
 			var opponentLocalizer = Core.Translation.GetPlayerLocalizer(opponent);
@@ -727,13 +844,16 @@ public sealed partial class Plugin
 			var opponentName = opponent.Controller?.PlayerName ?? "Player";
 
 			challenger.SendChat(
-				$"{challengerLocalizer["k4.general.prefix"]} Challenge accepted against {opponentName} ({weaponType}, best of {rounds}). It will start in the next round.");
-
+				//$"{challengerLocalizer["k4.general.prefix"]} Challenge sent to {opponentName} ({weaponType}, best of {rounds}). Waiting for acceptance.");
+				$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challengesent", opponentName, weaponType, rounds]}");
 			opponent.SendChat(
-				$"{opponentLocalizer["k4.general.prefix"]} {challengerName} challenged you ({weaponType}, best of {rounds}). The match will start in the next round.");
+				//$"{opponentLocalizer["k4.general.prefix"]} {challengerName} challenged you ({weaponType}, best of {rounds}). Type !accept within 20 seconds to accept.");
+				$"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challengenotification", challengerName, weaponType, rounds]}");
+
+			_ = WaitForChallengeTimeout(request);
 
 			Core.Logger.LogInformation(
-				"[Duel] Challenge {DuelId} created. Challenger: {ChallengerId}, Opponent: {OpponentId}, Weapon: {WeaponType}, BO{Rounds}.",
+				"[Duel] Challenge {DuelId} sent. Challenger: {ChallengerId}, Opponent: {OpponentId}, Weapon: {WeaponType}, BO{Rounds}.",
 				duel.Id,
 				challenger.PlayerID,
 				opponent.PlayerID,
@@ -754,16 +874,10 @@ public sealed partial class Plugin
 			var challengerName = duel.Challenger.Controller?.PlayerName ?? "Player";
 			var opponentName = duel.Opponent.Controller?.PlayerName ?? "Player";
 
-
-
 			duel.Challenger.SendChat(
-				$"{challengerLocalizer["k4.general.prefix"]} Duel started vs {opponentName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
-
-			duel.Opponent.SendChat(
-				$"{opponentLocalizer["k4.general.prefix"]} Duel started vs {challengerName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
-
-
-
+								//$"{challengerLocalizer["k4.general.prefix"]} Duel started vs {opponentName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
+								$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challangeNotification", opponentName, duel.WeaponType, duel.TotalRounds]}");
+			duel.Opponent.SendChat($"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challangeNotification", challengerName, duel.WeaponType, duel.TotalRounds]}");
 		}
 
 		public HashSet<ArenaPlayer> AssignPendingChallenges(List<ArenaPlayer> players)
@@ -775,8 +889,7 @@ public sealed partial class Plugin
 
 			foreach (var duel in _pendingDuels.Values.OrderBy(d => d.Id).ToList())
 			{
-				if (!_pendingDuels.ContainsKey(duel.Id))
-					continue;
+				if (!_pendingDuels.ContainsKey(duel.Id)) continue;
 
 				// Find both players in the list prepared for the next round.
 				var challenger = players.FirstOrDefault(p =>
@@ -791,18 +904,13 @@ public sealed partial class Plugin
 					challenger.IsAfk || opponent.IsAfk ||
 					!duel.Challenger.IsValid || !duel.Opponent.IsValid)
 				{
-					CancelPendingDuel(
-						duel,
-						"Challenge cancelled: one or both players are no longer available.");
+					CancelPendingDuel(duel, "k4.duels.playersnotavailable");
 
 					continue;
 				}
 
 				// Find a free arena.
-				var arena = _arenaManager.Arenas.FirstOrDefault(a =>
-					a.IsFreeForDuel &&
-					a.Team1Spawns.Count > 0 &&
-					a.Team2Spawns.Count > 0);
+				var arena = _arenaManager.Arenas.FirstOrDefault(a => a.IsFreeForDuel && a.Team1Spawns.Count > 0 && a.Team2Spawns.Count > 0);
 
 				// No free arena yet. Keep the challenge pending.
 				// Players can participate in normal matchmaking until an arena becomes available.
@@ -828,8 +936,7 @@ public sealed partial class Plugin
 
 				var arenaId = _arenaManager.Arenas.IndexOf(arena);
 
-				if (arenaId < 0)
-					continue;
+				if (arenaId < 0) continue;
 
 				try
 				{
@@ -840,12 +947,7 @@ public sealed partial class Plugin
 
 					// Assign the players to the duel arena.
 					// No teleporting or respawning happens here.
-					arena.SetupMatch(
-						[challenger],
-						[opponent],
-						roundType,
-						arenaId);
-
+					arena.SetupMatch([challenger], [opponent], roundType, arenaId);
 					if (!_activeDuels.TryAdd(duel.Id, duel))
 						throw new InvalidOperationException(
 							$"Duel {duel.Id} is already active.");
@@ -855,12 +957,7 @@ public sealed partial class Plugin
 					assignedPlayers.Add(challenger);
 					assignedPlayers.Add(opponent);
 
-					Core.Logger.LogInformation(
-						"[Duel] Challenge {DuelId} assigned to arena {ArenaId}. Challenger: {ChallengerId}, Opponent: {OpponentId}.",
-						duel.Id,
-						arenaId,
-						challenger.PlayerId,
-						opponent.PlayerId);
+					Core.Logger.LogInformation("[Duel] Challenge {DuelId} assigned to arena {ArenaId}. Challenger: {ChallengerId}, Opponent: {OpponentId}.", duel.Id, arenaId, challenger.PlayerId, opponent.PlayerId);
 				}
 				catch (Exception ex)
 				{
@@ -872,14 +969,9 @@ public sealed partial class Plugin
 						arena.ReleaseDuel();
 					}
 
-					Core.Logger.LogError(
-						ex,
-						"[Duel] Failed to assign challenge {DuelId}.",
-						duel.Id);
+					Core.Logger.LogError(ex, "[Duel] Failed to assign challenge {DuelId}.", duel.Id);
 
-					CancelPendingDuel(
-						duel,
-						"Challenge cancelled: an error occurred while preparing the arena.");
+					CancelPendingDuel(duel, "k4.duels.problemwitharena");
 				}
 			}
 
@@ -893,85 +985,129 @@ public sealed partial class Plugin
 
 			foreach (var player in new[] { duel.Challenger, duel.Opponent })
 			{
+				if (!player.IsValid) continue;
+
+				var localizer = Core.Translation.GetPlayerLocalizer(player);
+
+				player.SendChat($"{localizer["k4.general.prefix"]} {message}");
+			}
+
+			Core.Logger.LogInformation(
+				"[Duel] Pending challenge {DuelId} cancelled.", duel.Id);
+		}
+
+		private async Task WaitForChallengeTimeout(DuelInvitation request)
+		{
+			try
+			{
+				await Task.Delay(TimeSpan.FromSeconds(20), request.Cancellation.Token);
+
+				Core.Scheduler.NextTick(() => ExpireChallenge(request));
+			}
+			catch (OperationCanceledException)
+			{
+			}
+			finally
+			{
+				request.Cancellation.Dispose();
+			}
+		}
+
+		private void ExpireChallenge(DuelInvitation request)
+		{
+			if (!_challengeRequests.TryRemove(request.Duel.Id, out _))
+				return;
+
+			var duel = request.Duel;
+
+			foreach (var player in new[] { duel.Challenger, duel.Opponent })
+			{
 				if (!player.IsValid)
 					continue;
 
 				var localizer = Core.Translation.GetPlayerLocalizer(player);
 
 				player.SendChat(
-					$"{localizer["k4.general.prefix"]} {message}");
+					$"{localizer["k4.general.prefix"]} {localizer["k4.duels.expiredrequest"]}");
 			}
 
-			Core.Logger.LogInformation(
-				"[Duel] Pending challenge {DuelId} cancelled.",
-				duel.Id);
+			Core.Logger.LogInformation("[Duel] Challenge {DuelId} expired. Challenger: {ChallengerId}, Opponent: {OpponentId}.", duel.Id, duel.Challenger.PlayerID, duel.Opponent.PlayerID);
 		}
 
-	}
 
-
-
-	public sealed class DuelMatch
-	{
-		private static int _nextId;
-
-		public DuelMatch(IPlayer challenger, IPlayer opponent, string weaponType, int totalRounds)
+		private void CancelChallengeRequest(DuelInvitation request, string message)
 		{
-			Id = Interlocked.Increment(ref _nextId);
-			Challenger = challenger;
-			Opponent = opponent;
-			WeaponType = weaponType;
-			TotalRounds = totalRounds;
+			if (!_challengeRequests.TryRemove(request.Duel.Id, out _))
+				return;
+
+			try
+			{
+				request.Cancellation.Cancel();
+			}
+			catch (ObjectDisposedException)
+			{
+				// Timeout task has already finished.
+			}
+
+			foreach (var player in new[] { request.Duel.Challenger, request.Duel.Opponent })
+			{
+				if (!player.IsValid)
+					continue;
+
+				var localizer = Core.Translation.GetPlayerLocalizer(player);
+
+				player.SendChat($"{localizer["k4.general.prefix"]} {message}");
+			}
+
+			Core.Logger.LogInformation("[Duel] Challenge {DuelId} cancelled.", request.Duel.Id);
 		}
 
-		public int Id { get; }
-		public IPlayer Challenger { get; }
-		public IPlayer Opponent { get; }
-		public string WeaponType { get; }
-		public int TotalRounds { get; }
-		public int CurrentRound { get; private set; }
-		public int ChallengerScore { get; private set; }
-		public int OpponentScore { get; private set; }
-		public IPlayer? MatchWinner { get; private set; }
-		public bool IsFinished => MatchWinner != null;
-		public bool RoundResultProcessed { get; private set; }
-		public int RequiredScore => TotalRounds;
-		public bool IsStarted { get; private set; }
-
-		public void MarkStarted() => IsStarted = true;
-
-		public void ResetRoundResult() => RoundResultProcessed = false;
-
-		public bool TryMarkRoundResultProcessed()
+		private bool AcceptChallenge(DuelInvitation request)
 		{
-			if (RoundResultProcessed || IsFinished)
+			var duel = request.Duel;
+
+			if (!_challengeRequests.TryRemove(duel.Id, out _))
 				return false;
 
-			RoundResultProcessed = true;
+			try
+			{
+				request.Cancellation.Cancel();
+			}
+			catch (ObjectDisposedException)
+			{
+			}
+
+			if (!duel.Challenger.IsValid || !duel.Opponent.IsValid)
+				return false;
+
+			var challengerPlayer = GetWaitingDuelPlayer(duel.Challenger);
+			var opponentPlayer = GetWaitingDuelPlayer(duel.Opponent);
+
+			if (challengerPlayer == null || opponentPlayer == null)
+				return false;
+
+			if (!_pendingDuels.TryAdd(duel.Id, duel))
+				return false;
+
+			var challengerLocalizer = Core.Translation.GetPlayerLocalizer(duel.Challenger);
+			var opponentLocalizer = Core.Translation.GetPlayerLocalizer(duel.Opponent);
+
+			var opponentName = duel.Opponent.Controller?.PlayerName ?? "Player";
+			var challengerName = duel.Challenger.Controller?.PlayerName ?? "Player";
+
+			duel.Challenger.SendChat(
+				$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.startnotification", opponentName, duel.WeaponType, duel.TotalRounds]}");
+			duel.Opponent.SendChat(
+				//$"{opponentLocalizer["k4.general.prefix"]} You accepted the challenge from {challengerName}. The duel will start in the next round.");
+				$"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.startnotification", challengerName, duel.WeaponType, duel.TotalRounds]}");
+			Core.Logger.LogInformation(
+				"[Duel] Challenge {DuelId} accepted. Challenger: {ChallengerId}, Opponent: {OpponentId}.",
+				duel.Id,
+				duel.Challenger.PlayerID,
+				duel.Opponent.PlayerID);
+
 			return true;
 		}
 
-		public void AwardRound(IPlayer? winner)
-		{
-			if (IsFinished)
-				return;
-
-			if (winner != null &&
-				winner.PlayerID != Challenger.PlayerID &&
-				winner.PlayerID != Opponent.PlayerID)
-				return;
-
-			CurrentRound++;
-
-			if (winner?.PlayerID == Challenger.PlayerID)
-				ChallengerScore++;
-			else if (winner?.PlayerID == Opponent.PlayerID)
-				OpponentScore++;
-
-			if (ChallengerScore >= RequiredScore)
-				MatchWinner = Challenger;
-			else if (OpponentScore >= RequiredScore)
-				MatchWinner = Opponent;
-		}
 	}
 }

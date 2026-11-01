@@ -17,7 +17,7 @@
   "k4.chat.in_arena": " [white]Aktualnie znajdujesz się na arenie [lime]{0}[white].",
 
   "k4.chat.arena_roundstart": " [white]Arena: [lime]{0}[white] vs [lime]{1}[white] | Runda: [lime]{2}[white].",
-  "k4.chat.arena_roundstart_html": "<div style=\"text-align: center; padding: 5px;\"><font color=\"#A3FF42\" class=\"fontSize-s\">★ PIERDOLNIK.EU ★</font><br><font color=\"#FFFFFF\" class=\"fontSize-l\">ARENA - <font color=\"#A3FF42\">{0}</font></font><br><font color=\"#A3FF42\" class=\"fontSize-l\">{2}</font><br><font color=\"#FFFFFF\" class=\"fontSize-s\">{1}</font></div>",
+  "k4.chat.arena_roundstart_html": "<div style=\"text-align: center; padding: 5px;\"><font color=\"#A3FF42\" class=\"fontSize-s\">★ PIERDOLNIK.EU ★</font><br><font color=\"#FFFFFF\" class=\"fontSize-l\">ARENA - <font color=\"#A3FF42\">{0}</font></font><br><font color=\"#A3FF42\" class=\"fontSize-m\">{2} <font color=\"#FFFFFF\" >vs {1}</font></font></div>",
   "k4.chat.arena_commands": " [white]Zmień preferencje: [lime]!{0}[white] oraz [lime]!{1}[white].",
   "k4.chat.arena_afk": " [white]Przejdź w tryb AFK: [lime]!{0}[white].",
 
@@ -48,6 +48,42 @@
 
   "k4.menu.rounds.title": "★ Preferencje rund ★",
 
+  "k4.chat.arena_roundstartchallange": "[white]Runda rozpoczęta! Przeciwnik: [lime]{1}[white] | Tryb: [lime]{2}[white] | Wynik: [lime]{4}[white]:[lime]{5}[white] (do {3} rund)",
+  "k4.challenger.challangeNotification": "[white]Twoje wyzwanie zostało przyjęte! Pojedynek z graczem [lime]{0}[white] rozpocznie się wkrótce.",
+  "k4.duels.disabled": "[red]System pojedynków jest obecnie wyłączony.",
+  "k4.duels.norequest": "[red]Nie masz żadnego oczekującego wyzwania.",
+  "k4.duels.expiredrequest": "[red]To wyzwanie wygasło.",
+  "k4.duels.cancel": "[lime]Anulowałeś wyzwanie.",
+  "k4.duels.cancelnotification": "[red]Gracz [lime]{0}[red] anulował wyzwanie.",
+  "k4.duels.nofreearena": "[red]Pojedynek anulowany: arena nie jest już dostępna.",
+  "k4.duels.playernotavailable": "[red]Pojedynek anulowany: jeden z graczy jest niedostępny.",
+  "k4.duels.playersnotavailable": "[red]Jeden lub obaj gracze nie są już dostępni.",
+  "k4.duels.weaponnotavailable": "[red]Wybrany tryb broni jest niedostępny.",
+  "k4.duels.botnotavailable": "[red]Bot nie może obecnie zaakceptować wyzwania.",
+  "k4.duels.opponentafk": "[red]Pojedynek anulowany: przeciwnik jest AFK.",
+  "k4.duels.opponentleft": "[red]Pojedynek anulowany: przeciwnik opuścił serwer.",
+  "k4.duels.opponentleftorafk": "[red]Wyzwanie anulowane: jeden z graczy opuścił serwer lub jest AFK.",
+  "k4.duels.notavailablenow": "[red]Wyzwanie anulowane: system pojedynków został zatrzymany.",
+  "k4.duels.problemwitharena": "[red]Wyzwanie anulowane: wystąpił problem podczas przygotowywania areny.",
+  "k4.duels.duel.finished.allnotification": "[lime]Pojedynek zakończony! Zwycięzca: [white]{0}[lime]. Wynik: [white]{1} - {2}[lime].",
+
+  "k4.duels.noopponentavailable": "[red]Brak dostępnych przeciwników.",
+
+  "k4.duelsmenu.opponents": "Wybierz przeciwnika",
+  "k4.duelsmenu.weapontitle": "Pojedynek z {0}",
+  "k4.duelsmenu.roundtitle": "Liczba rund",
+  "k4.duelsmenu.roundoption": "Best of {0}",
+
+  "k4.duels.selectWeapon": "[white]Wybierz kategorię broni dla pojedynku.",
+
+
+  "k4.challenger.challengesent": "[white]Wyzwanie wysłane do [lime]{0}[white] ({1}, BO{2}). Oczekiwanie na akceptację.",
+  "k4.opponent.challengenotification": "[white]Gracz [lime]{0}[white] rzucił Ci wyzwanie ({1}, BO{2}). Wpisz [lime]!accept[white] w ciągu 20 sekund, aby je zaakceptować.",
+  "k4.challenger.startnotification": "[white]Gracz [lime]{0}[white] zaakceptował Twoje wyzwanie ({1}, BO{2}). Pojedynek rozpocznie się w następnej rundzie.",
+  "k4.opponent.startnotification": "[white]Zaakceptowałeś wyzwanie od gracza [lime]{0}[white] ({1}, BO{2}). Pojedynek rozpocznie się w następnej rundzie.",
+  "k4.challenger.challengeNotification": "[white]Rozpocząłeś pojedynek z graczem [lime]{0}[white] ({1}, BO{2}).",
+  "k4.opponent.challengeNotification": "[white]Rozpocząłeś pojedynek z graczem [lime]{0}[white] ({1}, BO{2}).",
+  
   "k4.weapontype.rifle": "Karabin",
   "k4.weapontype.sniper": "Snajperka",
   "k4.weapontype.shotgun": "Strzelba",

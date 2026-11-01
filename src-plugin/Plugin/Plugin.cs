@@ -19,7 +19,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.2", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.2.1", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -126,6 +126,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_databaseService = new DatabaseService(Config.CurrentValue.DatabaseConnection, Config.CurrentValue.DatabasePurgeDays);
 		_mapServices = new MapServices();
 		_duelService = new DuelService(_playerManager, _arenaManager, UpdatePlayerClantag);
+
+		_arenaManager.SetDuelService(_duelService);
+
 		//_autoBotFillService = new AutoBotFillService();
 
 		if (Config.CurrentValue.EnableAutoBotFill)
@@ -207,6 +210,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.QueueCommands, OnQueueCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.AfkCommands, OnAfkCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelCommands, OnDuelCommand);
+		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelAcceptCommands, OnDuelAcceptCommand);
+		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelCancelCommands, OnDuelCancelCommand);
 	}
 
 	private static void RegisterCommandWithAliases(List<string> commands, ICommandService.CommandListener handler)
@@ -536,6 +541,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			return HookResult.Continue;
 
 		_arenaManager.ProcessRoundEnd(_duelService.AssignPendingChallenges);
+				_duelService.HandleRoundStart();
 		RefreshAllClantags();
 
 		return HookResult.Continue;
@@ -545,7 +551,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	{
 		_arenaManager.IsBetweenRounds = false;
 		_pluginTerminatedRound = false;
-		_duelService.HandleRoundStart();
+
 
 		// Remind AFK players
 		if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == false)
@@ -984,6 +990,21 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		}
 	}
 
+	private void OnDuelAcceptCommand(ICommandContext ctx)
+	{
+		if (_duelService == null)
+			return;
+
+		_ = _duelService.HandleAcceptCommand(ctx) ? 0 : 0;
+	}
+
+		private void OnDuelCancelCommand(ICommandContext ctx)
+	{
+		if (_duelService == null)
+			return;
+
+		_ = _duelService.HandleCancelCommand(ctx) ? 0 : 0;
+	}
 	private void OnDuelCommand(ICommandContext ctx)
 	{
 		if (_duelService == null)

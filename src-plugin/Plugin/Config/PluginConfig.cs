@@ -49,6 +49,10 @@ public sealed partial class Plugin
 
 		/// <summary>Commands to open duel menu</summary>
 		public List<string> DuelCommands { get; set; } = ["duel"];
+				/// <summary>Commands to open duel menu</summary>
+		public List<string> DuelAcceptCommands { get; set; } = ["daccept"];
+				/// <summary>Commands to open duel menu</summary>
+		public List<string> DuelCancelCommands { get; set; } = ["dcancel"];
 	}
 
 	/// <summary>

@@ -15,12 +15,18 @@ public sealed partial class Plugin
 	{
 		private readonly PlayerManager _playerManager;
 		private readonly SpawnFinder _spawnFinder;
+		private Plugin.DuelService? _duelService;
 
 		/// <summary>All arenas on current map</summary>
 		public List<Arena> Arenas { get; } = [];
 
 		/// <summary>True during round transitions</summary>
 		public bool IsBetweenRounds { get; set; }
+
+		public void SetDuelService(Plugin.DuelService duelService)
+		{
+			_duelService = duelService;
+		}
 
 		public ArenaManager(PlayerManager playerManager)
 		{
@@ -40,7 +46,14 @@ public sealed partial class Plugin
 			var spawnPairs = _spawnFinder.GetArenaPairs();
 			foreach (var (team1Spawns, team2Spawns) in spawnPairs)
 			{
-				var arena = new Arena(_playerManager, team1Spawns, team2Spawns);
+				if (_duelService == null)
+					throw new InvalidOperationException("DuelService has not been initialized.");
+
+				var arena = new Arena(
+					_playerManager,
+					team1Spawns,
+					team2Spawns,
+					_duelService);
 				Arenas.Add(arena);
 			}
 
@@ -300,8 +313,12 @@ public sealed partial class Plugin
 				return false;
 
 			var pawn = player.Player.PlayerPawn;
+
 			if (pawn?.LifeState == (byte)LifeState_t.LIFE_ALIVE)
 			{
+				player.PendingSetupCts?.Cancel();
+				player.PendingSetupCts = null;
+
 				player.CurrentArena.SetupPlayer(player);
 				return true;
 			}
@@ -341,7 +358,23 @@ public sealed partial class Plugin
 			if (arenaPlayer == null)
 				return;
 
-			arenaPlayer.CurrentArena?.SetupPlayer(arenaPlayer);
+			var arena = arenaPlayer.CurrentArena;
+			if (arena == null)
+				return;
+
+			arena.SetupPlayer(arenaPlayer);
+
+			if (arena.IsDuelArena)
+			{
+				if(_duelService == null) return;
+				var duel = _duelService.GetActiveDuel(player);
+
+				// Duel nie jest jeszcze aktywny — komunikat wyśle HandleRoundStart.
+				if (duel == null || !duel.IsStarted)
+					return;
+			}
+
+			arena.SendArenaMessage(arenaPlayer);
 		}
 
 		/// <summary>True if all arenas with real players are done</summary>

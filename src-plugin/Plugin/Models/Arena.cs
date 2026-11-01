@@ -19,7 +19,7 @@ public sealed partial class Plugin
 	public class Arena
 	{
 		private readonly PlayerManager _playerManager;
-
+		private readonly Plugin.DuelService _duelService;
 		/// <summary>Arena ID (0-based, -1 for warmup)</summary>
 		public int Id { get; private set; } = -1;
 
@@ -50,11 +50,12 @@ public sealed partial class Plugin
 		/// <summary>Result from the last round</summary>
 		public ArenaResult Result { get; private set; } = ArenaResult.Empty;
 
-		public Arena(PlayerManager playerManager, IReadOnlyList<SpawnLocation> team1Spawns, IReadOnlyList<SpawnLocation> team2Spawns)
+		public Arena(PlayerManager playerManager, IReadOnlyList<SpawnLocation> team1Spawns, IReadOnlyList<SpawnLocation> team2Spawns, Plugin.DuelService duelService)
 		{
 			_playerManager = playerManager;
 			Team1Spawns = team1Spawns;
 			Team2Spawns = team2Spawns;
+			_duelService = duelService;
 		}
 
 		/// <summary>Team 1 ArenaPlayers resolved from PlayerManager</summary>
@@ -217,7 +218,7 @@ public sealed partial class Plugin
 				return;
 
 			player.TeleportToSpawn();
-			player.ApplyScoreboardOrder();   // <-- tu
+			player.ApplyScoreboardOrder();
 
 			var pawn = player.Player.PlayerPawn;
 			pawn?.Health = 100;
@@ -226,11 +227,8 @@ public sealed partial class Plugin
 
 			player.SetupWeapons(roundType);
 
-			// Call special round OnPlayerSpawn callback
 			if (roundType.IsSpecialRound)
 				roundType.OnPlayerSpawn?.Invoke(player.Player);
-
-			SendArenaMessage(player);
 		}
 
 		/// <summary>
@@ -244,6 +242,8 @@ public sealed partial class Plugin
 			if (!player.IsValid)
 				return;
 
+			if (player.CurrentArena == null) return;
+
 			var localizer = Core.Translation.GetPlayerLocalizer(player.Player);
 			var opponents = GetOpponents(player.Player).Select(p => p.Player.Controller.PlayerName).ToList();
 			var opponentNames = opponents.Count > 0
@@ -255,8 +255,36 @@ public sealed partial class Plugin
 				: localizer[CurrentRoundType?.Name ?? "k4.general.random"];
 
 			var freezeTimeMs = 6000;
+			if (!player.CurrentArena.IsDuelArena)
+			{
+				player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstart", arenaName, opponentNames, roundName]}");
+			}
+			else
+			{
+				var duel = _duelService.GetActiveDuel(player.Player);
+
+				if (duel != null)
+				{
+					var isChallenger = player.PlayerId == duel.Challenger.PlayerID;
+					var playerScore = isChallenger ? duel.ChallengerScore : duel.OpponentScore;
+					var opponentScore = isChallenger ? duel.OpponentScore : duel.ChallengerScore;
+					arenaName = "CHALLANGE";
+					if (!duel.StartMessageSent && (opponentScore == 0 && playerScore == 0))
+					{
+						player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
+						duel.StartMessageSent = true;
+					}
+					else if (opponentScore > 0 || playerScore > 0)
+					{
+						player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
+
+					}
+
+				}
+
+			}
+
 			player.Player.SendCenterHTML(localizer["k4.chat.arena_roundstart_html", arenaName, opponentNames, roundName], freezeTimeMs);
-			player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstart", arenaName, opponentNames, roundName]}");
 		}
 
 		/// <summary>Display name (server language)</summary>

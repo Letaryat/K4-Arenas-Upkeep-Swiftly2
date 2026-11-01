@@ -18,7 +18,7 @@
   "k4.chat.in_arena": " [white]You are currently in arena [lime]{0}[white].",
 
   "k4.chat.arena_roundstart": " [white]Arena: [lime]{0}[white] vs [lime]{1}[white] | Round: [lime]{2}[white].",
-  "k4.chat.arena_roundstart_html": "<div style=\"text-align: center; padding: 5px;\"><font color=\"#A3FF42\" class=\"fontSize-s\">★ PIERDOLNIK.EU ★</font><br><font color=\"#FFFFFF\" class=\"fontSize-l\">ARENA - <font color=\"#A3FF42\">{0}</font></font><br><font color=\"#A3FF42\" class=\"fontSize-l\">{2}</font><br><font color=\"#FFFFFF\" class=\"fontSize-s\">{1}</font></div>",
+  "k4.chat.arena_roundstart_html": "<div style=\"text-align: center; padding: 5px;\"><font color=\"#A3FF42\" class=\"fontSize-s\">★ PIERDOLNIK.EU ★</font><br><font color=\"#FFFFFF\" class=\"fontSize-l\">ARENA - <font color=\"#A3FF42\">{0}</font></font><br><font color=\"#A3FF42\" class=\"fontSize-m\">{2} <font color=\"#FFFFFF\" >vs {1}</font></font></div>",
   "k4.chat.arena_commands": " [white]Change your preferences: [lime]!{0}[white] and [lime]!{1}[white].",
   "k4.chat.arena_afk": " [white]Go AFK: [lime]!{0}[white].",
 
@@ -48,6 +48,42 @@
   "k4.menu.guns.random": "Random",
 
   "k4.menu.rounds.title": "★ Round Preferences ★",
+
+
+  "k4.chat.arena_roundstartchallange": "[white]Round started! Opponent: [lime]{1}[white] | Mode: [lime]{2}[white] | Score: [lime]{4}[white]:[lime]{5}[white] (first to {3} rounds)",  
+  "k4.challenger.challangeNotification": "[white]Your challenge has been accepted! Your duel against {0}[white] will begin shortly.",
+  "k4.duels.disabled": "[red]The duel system is currently disabled.",
+  "k4.duels.norequest": "[red]You have no pending challenge.",
+  "k4.duels.expiredrequest": "[red]This challenge has expired.",
+  "k4.duels.cancel": "[lime]You cancelled the challenge.",
+  "k4.duels.cancelnotification": "[red]Player [lime]{0}[red] cancelled the challenge.",
+  "k4.duels.nofreearena": "[red]Duel cancelled: the arena is no longer available.",
+  "k4.duels.playernotavailable": "[red]Duel cancelled: one of the players is unavailable.",
+  "k4.duels.playersnotavailable": "[red]One or both players are no longer available.",
+  "k4.duels.weaponnotavailable": "[red]The selected weapon mode is unavailable.",
+  "k4.duels.botnotavailable": "[red]The bot cannot accept the challenge right now.",
+  "k4.duels.opponentafk": "[red]Duel cancelled: your opponent is AFK.",
+  "k4.duels.opponentleft": "[red]Duel cancelled: your opponent left the server.",
+  "k4.duels.opponentleftorafk": "[red]Challenge cancelled: one of the players left the server or became AFK.",
+  "k4.duels.notavailablenow": "[red]Challenge cancelled: the duel system has been stopped.",
+  "k4.duels.problemwitharena": "[red]Challenge cancelled: an error occurred while preparing the arena.",
+  "k4.duels.duel.finished.allnotification": "[lime]Duel finished! Winner: [white]{0}[lime]. Score: [white]{1} - {2}[lime].",
+
+  "k4.duels.noopponentavailable": "[red]There are no available opponents.",
+
+  "k4.duelsmenu.opponents": "Select an opponent",
+  "k4.duelsmenu.weapontitle": "Duel vs {0}",
+  "k4.duelsmenu.roundtitle": "Number of rounds",
+  "k4.duelsmenu.roundoption": "Best of {0}",
+
+  "k4.duels.selectWeapon": "[white]Choose a weapon category for the duel.",
+
+  "k4.challenger.challengesent": "[white]Challenge sent to [lime]{0}[white] ({1}, BO{2}). Waiting for acceptance.",
+  "k4.opponent.challengenotification": "[white]Player [lime]{0}[white] challenged you ({1}, BO{2}). Type [lime]!accept[white] within 20 seconds to accept.",
+  "k4.challenger.startnotification": "[white]Player [lime]{0}[white] accepted your challenge ({1}, BO{2}). The duel will start in the next round.",
+  "k4.opponent.startnotification": "[white]You accepted the challenge from [lime]{0}[white] ({1}, BO{2}). The duel will start in the next round.",
+  "k4.challenger.challengeNotification": "[white]Duel started against [lime]{0}[white] ({1}, BO{2}).",
+  "k4.opponent.challengeNotification": "[white]Duel started against [lime]{0}[white] ({1}, BO{2}).",
 
   "k4.weapontype.rifle": "Rifle",
   "k4.weapontype.sniper": "Sniper Rifle",
