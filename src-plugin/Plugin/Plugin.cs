@@ -307,12 +307,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			{
 				ApplyGameConfig();
 			}
-			/*
-			if (Config.CurrentValue.EnableAutoBotFillService)
-			{
-				Core.Scheduler.RepeatBySeconds(5f, () => _autoBotFillService.Tick());
-			}
-			*/
+
+			var warmupOnline = Core.ConVar.Find<bool>("mp_warmup_online_enabled");
+
 			// Check for common issues
 			CheckCommonProblems();
 
@@ -325,11 +322,39 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 				}
 			}
 
+
 			// Setup clantag refresh timer if enabled
 			if (!Config.CurrentValue.Compatibility.DisableClantags)
 			{
 				_clantagTimerCts = Core.Scheduler.RepeatBySeconds(3f, RefreshAllClantags);
 			}
+
+			if (warmupOnline == null) return;
+			if (warmupOnline.Value)
+			{
+				Core.Scheduler.DelayBySeconds(3f, () =>
+				{
+					if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
+					{
+						_warmupTimerCts = Core.Scheduler.RepeatBySeconds(2f, () =>
+						{
+							if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
+							{
+								_arenaManager.PopulateWarmupMatches();
+							}
+							else
+							{
+								_warmupTimerCts?.Cancel();
+								_warmupTimerCts = null;
+							}
+						});
+					}
+				});
+			}
+
+
+
+
 		});
 	}
 
