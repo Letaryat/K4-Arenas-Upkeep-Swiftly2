@@ -103,6 +103,32 @@ public sealed partial class Plugin
 		/// <summary>Player health</summary>
 		public int Health { get; set; } = 100;
 
+		/// <summary>
+		/// Hitgroups that can receive damage.
+		/// "All" preserves the default behavior.
+		/// </summary>
+		public List<string> DamageHitgroups { get; set; } = ["All"];
+
+		/// <summary>
+		/// Player model scale. 1.0 = default size.
+		/// </summary>
+		public float PlayerScale { get; set; } = 1.0f;
+
+		/// <summary>
+		/// Player gravity multiplier. 1.0 = default.
+		/// </summary>
+		public float PlayerGravity { get; set; } = 1.0f;
+
+		/// <summary>
+		/// Player movement speed multiplier. 1.0 = default.
+		/// </summary>
+		//public float PlayerSpeed { get; set; } = 1.0f;
+
+		/// <summary>
+		/// Enable or disable crosshair.
+		/// </summary>
+		public bool CrosshairEnabled { get; set; } = true;
+
 		/// <summary>Parses PrimaryPreference string to CSWeaponType</summary>
 		public CSWeaponType? GetPrimaryPreferenceType()
 		{
@@ -120,5 +146,9 @@ public sealed partial class Plugin
 				_ => null
 			};
 		}
+
+
+
+
 	}
 }

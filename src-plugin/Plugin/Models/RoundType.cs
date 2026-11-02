@@ -32,6 +32,13 @@ public sealed partial class Plugin
 		public bool UsePreferredPrimary { get; }
 		public bool UsePreferredSecondary { get; }
 
+		public IReadOnlyList<string> DamageHitgroups { get; }
+		public float PlayerScale { get; }
+		public float PlayerGravity { get; }
+		//public float PlayerSpeed { get; }
+		public bool CrosshairEnabled { get; }
+
+
 		// special round only
 		public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundStart { get; }
 		public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundEnd { get; }
@@ -43,6 +50,7 @@ public sealed partial class Plugin
 			teamSize: 1,
 			usePreferredPrimary: true,
 			usePreferredSecondary: true
+
 		);
 
 		private RoundType(string name, int teamSize = 1, bool usePreferredPrimary = false, bool usePreferredSecondary = false)
@@ -56,6 +64,11 @@ public sealed partial class Plugin
 			Helmet = true;
 			Health = 100;
 			EnabledByDefault = true;
+			DamageHitgroups = ["All"];
+			PlayerScale = 1.0f;
+			PlayerGravity = 1.0f;
+			//PlayerSpeed = 1.0f;
+			CrosshairEnabled = true;
 		}
 
 		/// <summary>From file config</summary>
@@ -74,6 +87,15 @@ public sealed partial class Plugin
 			UsePreferredSecondary = config.UsePreferredSecondary;
 			PrimaryPreference = config.GetPrimaryPreferenceType();
 			IsSpecialRound = false;
+			DamageHitgroups = config.DamageHitgroups
+			.Select(x => x.Trim())
+			.Where(x => !string.IsNullOrWhiteSpace(x))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+			PlayerScale = config.PlayerScale;
+			PlayerGravity = config.PlayerGravity;
+			//PlayerSpeed = config.PlayerSpeed;
+			CrosshairEnabled = config.CrosshairEnabled;
 		}
 
 		/// <summary>From API config</summary>
@@ -91,6 +113,11 @@ public sealed partial class Plugin
 			OnRoundStart = config.OnRoundStart;
 			OnRoundEnd = config.OnRoundEnd;
 			OnPlayerSpawn = config.OnPlayerSpawn;
+			DamageHitgroups = ["All"];
+			PlayerScale = 1.0f;
+			PlayerGravity = 1.0f;
+			//PlayerSpeed = 1.0f;
+			CrosshairEnabled = true;
 			IsSpecialRound = true;
 		}
 

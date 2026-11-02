@@ -9,6 +9,7 @@ using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.GameHooks;
 using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
@@ -19,7 +20,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.2.1", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.2.2", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -91,6 +92,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			Core.Command.UnhookClientCommand(_jointeamHookGuid.Value);
 			_jointeamHookGuid = null;
 		}
+		Core.GameHooks.Entities.TakeDamage.Pre -= HookOnTakeDamage;
 	}
 
 	public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
@@ -173,15 +175,12 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		Core.GameEvent.HookPost<EventPlayerDeath>(OnPlayerDeath);
 		Core.GameEvent.HookPre<EventPlayerTeam>(OnPlayerTeam);
 		Core.GameEvent.HookPre<EventRoundAnnounceMatchStart>(OnMatchStart);
+		Core.GameEvent.HookPre<EventPlayerHurt>(OnPlayerHurt);
 
 		// Block MVP event
 		Core.GameEvent.HookPre<EventRoundMvp>(OnRoundMvp);
 
-		// Optional: Block damage/flash from non-opponents
-		if (Config.CurrentValue.Compatibility.BlockDamageOfNotOpponent)
-		{
-			Core.GameEvent.HookPre<EventPlayerHurt>(OnPlayerHurt);
-		}
+
 
 		if (Config.CurrentValue.Compatibility.BlockFlashOfNotOpponent)
 		{
@@ -190,6 +189,38 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 		// Hook jointeam command to block unauthorized team switches
 		_jointeamHookGuid = Core.Command.HookClientCommand(OnJoinTeamCommand);
+		Core.GameHooks.Entities.TakeDamage.Pre += HookOnTakeDamage;
+	}
+
+
+
+	private void HookOnTakeDamage(ref TakeDamageEntityPreContext ctx)
+	{
+		if (ctx.Params.Entity is not CBasePlayerPawn pawn)
+			return;
+
+		var victim = Core.PlayerManager.GetPlayerFromPawn(pawn);
+
+		if (victim == null || !victim.IsValid)
+			return;
+
+		var arenaPlayer = _playerManager.GetPlayer(victim);
+
+		if (arenaPlayer?.CurrentArena == null)
+			return;
+
+		var roundType = arenaPlayer.CurrentArena.CurrentRoundType ?? RoundType.Warmup;
+
+		var allowedHitgroups = roundType.DamageHitgroups;
+
+		if (allowedHitgroups.Any(x =>
+			x.Equals("All", StringComparison.OrdinalIgnoreCase)))
+			return;
+
+		var actualHitgroup = ctx.Params.Info.ActualHitGroup;
+
+		if (!IsHitgroupAllowed(actualHitgroup, allowedHitgroups))
+			ctx.Params.Info.Damage = 0;
 	}
 
 	private HookResult OnMatchStart(EventRoundAnnounceMatchStart eventObj)
@@ -541,7 +572,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			return HookResult.Continue;
 
 		_arenaManager.ProcessRoundEnd(_duelService.AssignPendingChallenges);
-				_duelService.HandleRoundStart();
+		_duelService.HandleRoundStart();
 		RefreshAllClantags();
 
 		return HookResult.Continue;
@@ -740,22 +771,24 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private HookResult OnPlayerHurt(EventPlayerHurt ev)
 	{
-		if (!Config.CurrentValue.Compatibility.BlockDamageOfNotOpponent)
-			return HookResult.Continue;
-
 		var attacker = ev.Accessor.GetPlayer("attacker");
 		var victim = ev.UserIdPlayer;
 
-		if (attacker is null || !attacker.IsValid || victim is null || !victim.IsValid)
+		if (attacker is null || !attacker.IsValid ||
+			victim is null || !victim.IsValid)
 			return HookResult.Continue;
 
 		var attackerArena = _playerManager.GetPlayer(attacker)?.CurrentArena;
 		var victimArena = _playerManager.GetPlayer(victim)?.CurrentArena;
 
-		// If players are in different arenas, block damage by healing it back
-		if (attackerArena != victimArena)
+		if (victimArena == null)
+			return HookResult.Continue;
+
+		if (Config.CurrentValue.Compatibility.BlockDamageOfNotOpponent &&
+			attackerArena != victimArena)
 		{
 			var pawn = ev.UserIdPawn;
+
 			if (pawn.IsValid)
 			{
 				pawn.Health += ev.ActualDmgHealth;
@@ -998,7 +1031,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_ = _duelService.HandleAcceptCommand(ctx) ? 0 : 0;
 	}
 
-		private void OnDuelCancelCommand(ICommandContext ctx)
+	private void OnDuelCancelCommand(ICommandContext ctx)
 	{
 		if (_duelService == null)
 			return;
@@ -1396,4 +1429,31 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	}
 
 	#endregion
+
+	private static bool IsHitgroupAllowed(
+		HitGroup_t hitgroup,
+		IReadOnlyList<string> allowedHitgroups)
+	{
+		var hitgroupName = hitgroup switch
+		{
+			HitGroup_t.HITGROUP_GENERIC => "Generic",
+			HitGroup_t.HITGROUP_HEAD => "Head",
+			HitGroup_t.HITGROUP_CHEST => "Chest",
+			HitGroup_t.HITGROUP_STOMACH => "Stomach",
+			HitGroup_t.HITGROUP_LEFTARM => "LeftArm",
+			HitGroup_t.HITGROUP_RIGHTARM => "RightArm",
+			HitGroup_t.HITGROUP_LEFTLEG => "LeftLeg",
+			HitGroup_t.HITGROUP_RIGHTLEG => "RightLeg",
+			HitGroup_t.HITGROUP_NECK => "Neck",
+			HitGroup_t.HITGROUP_GEAR => "Gear",
+			_ => null
+		};
+
+		if (hitgroupName == null)
+			return false;
+
+		return allowedHitgroups.Any(x =>
+			x.Equals(hitgroupName, StringComparison.OrdinalIgnoreCase));
+	}
+
 }

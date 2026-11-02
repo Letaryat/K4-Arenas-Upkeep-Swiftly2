@@ -2,6 +2,7 @@ using K4ArenaSharedApi;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
@@ -220,16 +221,20 @@ public sealed partial class Plugin
 			player.TeleportToSpawn();
 			player.ApplyScoreboardOrder();
 
-			var pawn = player.Player.PlayerPawn;
-			pawn?.Health = 100;
-
 			var roundType = CurrentRoundType ?? RoundType.Warmup;
 
 			player.SetupWeapons(roundType);
 
+			CrosshairModifier(player, roundType.CrosshairEnabled);
+			PlayerScaleModifier(player, roundType.PlayerScale);
+			GravityModifier(player, roundType.PlayerGravity);
+			//SpeedModifier(player, roundType.PlayerSpeed);
+
 			if (roundType.IsSpecialRound)
 				roundType.OnPlayerSpawn?.Invoke(player.Player);
 		}
+
+
 
 		/// <summary>
 		/// Shows arena info message to a player (called once on initial assignment, not on respawns)
@@ -373,6 +378,7 @@ public sealed partial class Plugin
 			foreach (var player in AllPlayers)
 			{
 				player.ClearArenaState();
+				ResetRoundModifiers(player);
 			}
 
 			Team1SteamIds = [];
@@ -409,5 +415,99 @@ public sealed partial class Plugin
 				player.PlayerIsSafe = false;
 			}
 		}
+
+		// Round modifers:
+		private void CrosshairModifier(ArenaPlayer player, bool isEnabled)
+		{
+			if (!player.IsValid)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn == null)
+				return;
+
+			if (!isEnabled)
+				pawn.HideHUD = 1 << 8;
+			else
+				pawn.HideHUD = 0;
+
+			pawn.HideHUDUpdated();
+		}
+		private void PlayerScaleModifier(ArenaPlayer player, float scale)
+		{
+
+			if (!player.IsValid)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn == null)
+				return;
+
+			// Skalowanie modelu
+			pawn.SetScale(scale);
+
+			if(scale == 1.0) return;
+
+			// Collision stuff from: https://gitlab.com/cs2-server-plugins/cs2-minihumans/
+
+			const float HalfXY = 16f;
+			const float StandMaxZ = 72f;
+
+			var collision = pawn.Collision;
+			if (collision == null)
+				return;
+
+			float half = HalfXY * scale;
+			float maxZ = StandMaxZ * scale;
+
+			collision.Mins = new Vector(-half, -half, 0f);
+			collision.Maxs = new Vector(half, half, maxZ);
+
+			collision.MinsUpdated();
+			collision.MaxsUpdated();
+		}
+		private void GravityModifier(ArenaPlayer player, float _scale)
+		{
+			if (!player.IsValid)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn == null)
+				return;
+
+			pawn.ActualGravityScale = _scale;
+			return;
+		}
+		public void SpeedModifier(ArenaPlayer player, float scale)
+		{
+			if (!player.IsValid)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn == null)
+				return;
+
+			pawn.VelocityModifier = scale;
+			pawn.VelocityModifierUpdated();
+		}
+
+		private void ResetRoundModifiers(ArenaPlayer player)
+		{
+			if (!player.IsValid)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+			if (pawn == null)
+				return;
+
+			CrosshairModifier(player, true);
+
+			PlayerScaleModifier(player, 1.0f);
+
+			GravityModifier(player, 1.0f);
+
+			//SpeedModifier(player, 1.0f);
+		}
+
 	}
 }
