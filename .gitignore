@@ -65,3 +65,10 @@ obj/
 **/*.local
 
 testignore
+
+**/bin/**
+**/obj/**
+**/*.dll
+**/*.pdb
+**/*.deps.json
+**/*.runtimeconfig.json

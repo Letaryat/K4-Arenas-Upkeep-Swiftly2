@@ -1,15 +1,20 @@
-<div align="center">
-  <h1 align="center">KitsuneLab©</h1>
-  <h3 align="center">K4 - Arenas</h3>
-  <a align="center">An all-in-one arena plugin for Counter-Strike 2 with ladder-style gameplay. Supports any map, 2v2/3v3 modes, weapon preferences and a developer API for custom round types.</a>
-</div>
-
 # Important notice!
 > [!IMPORTANT]  
 > [K4ryuu](https://github.com/K4ryuu) is the creator of this plugin.<br>
-> Since he is no longer maintaining his CS2 plugins, I forked some of them and maintain them ONLY FOR BUG FIXES!
+> Since he is no longer maintaining his CS2 plugins, I forked the fork from [Shmitzas](https://github.com/shmitzas/K4-Arenas-Upkeep). New features are mostly vibecoded but tested.
 
----
+<div align="center">
+  <h3 align="center">K4 - Arenas (PoorVersion)</h3>
+  <a align="center">An all-in-one arena plugin for Counter-Strike 2 with ladder-style gameplay. Supports any map, 2v2/3v3 modes, weapon preferences and a developer API for custom round types.</a>
+</div>
+
+<div align="center">
+    <p>Support further vibecoded development</p>
+    <h2>
+        <a href="https://discord.com/invite/mEmdyqM3Um" target="_blank"><img src="https://img.shields.io/badge/Discord%20Server-7289da?style=for-the-badge&logo=discord&logoColor=white" /></a>
+        <a href="https://ko-fi.com/letaryat" target="_blank"><img src="https://img.shields.io/badge/Ko--fi-F16061?logo=ko-fi&logoColor=white&style=for-the-badge" /></a>
+    </h2>
+</div>
 
 ### Dependencies
 
@@ -34,22 +39,25 @@
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<!-- CONFIGURATION -->
-
 ## Configuration
 
 | Option               | Description                                      | Default    |
 | -------------------- | ------------------------------------------------ | ---------- |
 | `DatabaseConnection` | Database connection name for storing preferences | `""`       |
-| `MinPlayersToStart`  | Minimum players required to start arenas         | `2`        |
-| `RoundTimeSeconds`   | Round duration in seconds                        | `60`       |
-| `ArenaAfkCommand`    | Command to toggle AFK status                     | `"afk"`    |
-| `ArenaGunsCommand`   | Command to open weapon preferences               | `"guns"`   |
-| `ArenaRoundsCommand` | Command to open round preferences                | `"rounds"` |
+| `DatabasePurgeDays`  | Days to purge information in k4-arenas tables         | `30`        |
+| `UsePredefinedCOnfig`   | Use settings that plugin will automatically use for proper multiarena experience                         | `true`       |
+| `GunsCommands`    | Command to change guns preferences | `"guns", "gunpref"....`    |
+| `RoundsCommands`    | Command to change rounds preferences | `"rounds", "roundspref"`    |
+| `QueueCommands`    | Command to add player to queue | `"queue"`    |
+| `ArenaAfkCommand`    | Command to toggle AFK status | `"afk"`    |
+| `DuelCommands`    | Command to challenge player to specific round type and BO(X) duel | `"duel"`    |
+| `DuelAcceptCommands`    | Command to accept duel | `"daccept"`    |
+| `DuelCancelCommands`    | Command to cancel pending request for a duel | `"dcancel"`    |
+| `EnableDuelService`    | Enable duel service                     | `"true"`    |
+| `DuelBORounds`    | Duel BO Rounds                     | `1,2,3,4,5,6,7,8`    |
+| `EnableAutoBotFill`    | Enable auto bot fill when players are not even                     | `false`    |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- COMMANDS -->
 
 ## Commands
 
@@ -57,7 +65,11 @@
 | --------- | -------------------------------- |
 | `!guns`   | Open weapon preferences menu     |
 | `!rounds` | Open round type preferences menu |
+| `!queue`    | Toggle queue status                |
 | `!afk`    | Toggle AFK status                |
+| `!duel`    | Opens menu to request player for a challenge                 |
+| `!daccept`    | Accept pending request for a duel                |
+| `!dcancel`    | Deny pending request for a duel                |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
