@@ -35,6 +35,7 @@ public sealed partial class Plugin
 
 		/// <summary>Active round type for this match</summary>
 		public RoundType? CurrentRoundType { get; private set; }
+		public int RoundGeneration { get; private set; }
 
 		/// <summary>Team 1 spawn points (T side)</summary>
 		public IReadOnlyList<SpawnLocation> Team1Spawns { get; }
@@ -117,6 +118,8 @@ public sealed partial class Plugin
 			CurrentRoundType = roundType;
 			Result = ArenaResult.Empty;
 
+			RoundGeneration++;
+
 			Team1SteamIds = team1.Select(p => p.Player).ToList();
 			Team2SteamIds = team2?.Select(p => p.Player).ToList() ?? [];
 
@@ -139,6 +142,8 @@ public sealed partial class Plugin
 			Score = 0;
 			CurrentRoundType = null;
 			Result = ArenaResult.Empty;
+
+			RoundGeneration++;
 
 			Team1SteamIds = [player1.Player];
 			Team2SteamIds = player2 != null ? [player2.Player] : [];
@@ -387,6 +392,7 @@ public sealed partial class Plugin
 			Result = ArenaResult.Empty;
 			Id = -1;
 			Score = 0;
+			RoundGeneration++;
 		}
 
 		private void AssignTeamDetails(IReadOnlyList<ArenaPlayer> team, IReadOnlyList<SpawnLocation> spawns, Team switchTo, int teamNumber)

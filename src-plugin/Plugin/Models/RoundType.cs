@@ -38,6 +38,8 @@ public sealed partial class Plugin
 		//public float PlayerSpeed { get; }
 		public bool CrosshairEnabled { get; }
 
+		public bool TriggerDiscipline { get; }
+		public int TriggerDisciplineDamage {get;}
 
 		// special round only
 		public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundStart { get; }
@@ -69,6 +71,7 @@ public sealed partial class Plugin
 			PlayerGravity = 1.0f;
 			//PlayerSpeed = 1.0f;
 			CrosshairEnabled = true;
+			TriggerDiscipline = false;
 		}
 
 		/// <summary>From file config</summary>
@@ -96,6 +99,8 @@ public sealed partial class Plugin
 			PlayerGravity = config.PlayerGravity;
 			//PlayerSpeed = config.PlayerSpeed;
 			CrosshairEnabled = config.CrosshairEnabled;
+			TriggerDiscipline = config.TriggerDiscipline;
+			TriggerDisciplineDamage = config.TriggerDisciplineDamage;
 		}
 
 		/// <summary>From API config</summary>
@@ -119,6 +124,7 @@ public sealed partial class Plugin
 			//PlayerSpeed = 1.0f;
 			CrosshairEnabled = true;
 			IsSpecialRound = true;
+			TriggerDiscipline = false;
 		}
 
 		public RoundTypeInfo ToInfo() => new()

@@ -129,6 +129,9 @@ public sealed partial class Plugin
 		/// </summary>
 		public bool CrosshairEnabled { get; set; } = true;
 
+		public bool TriggerDiscipline { get; set; } = false;
+		public int TriggerDisciplineDamage {get; set; } = 0;
+
 		/// <summary>Parses PrimaryPreference string to CSWeaponType</summary>
 		public CSWeaponType? GetPrimaryPreferenceType()
 		{

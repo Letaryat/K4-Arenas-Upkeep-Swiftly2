@@ -93,6 +93,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			_jointeamHookGuid = null;
 		}
 		Core.GameHooks.Entities.TakeDamage.Pre -= HookOnTakeDamage;
+
+		_triggerHitBullets.Clear();
 	}
 
 	public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
@@ -176,6 +178,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		Core.GameEvent.HookPre<EventPlayerTeam>(OnPlayerTeam);
 		Core.GameEvent.HookPre<EventRoundAnnounceMatchStart>(OnMatchStart);
 		Core.GameEvent.HookPre<EventPlayerHurt>(OnPlayerHurt);
+		Core.GameEvent.HookPre<EventWeaponFire>(OnWeaponFire);
 
 		// Block MVP event
 		Core.GameEvent.HookPre<EventRoundMvp>(OnRoundMvp);
@@ -190,7 +193,85 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		Core.GameHooks.Entities.TakeDamage.Pre += HookOnTakeDamage;
 	}
 
+	private HookResult OnWeaponFire(EventWeaponFire ev)
+	{
+		var player = ev.UserIdPlayer;
 
+		if (player == null || !player.IsValid)
+			return HookResult.Continue;
+
+		var arenaPlayer = _playerManager.GetPlayer(player);
+		var arena = arenaPlayer?.CurrentArena;
+		var roundType = arena?.CurrentRoundType;
+
+		if (arena == null || roundType?.TriggerDiscipline != true)
+			return HookResult.Continue;
+
+		if (arena.GetPlayerTeam(player) == 0)
+			return HookResult.Continue;
+
+		// Pobieramy typ aktualnie trzymanej broni.
+		var weaponType = player.PlayerPawn?
+			.WeaponServices?
+			.ActiveWeapon.Value?
+			.PlayerWeaponVData?
+			.As<CCSWeaponBaseVData>()
+			.WeaponType;
+
+		if (weaponType == null || weaponType == CSWeaponType.WEAPONTYPE_KNIFE)
+			return HookResult.Continue;
+
+		var slot = player.Slot;
+		var hitsBeforeShot = _triggerHitBullets.GetValueOrDefault(slot);
+		var roundGeneration = arena.RoundGeneration;
+
+		Core.Scheduler.NextWorldUpdate(() =>
+		{
+			var currentPlayer = Core.PlayerManager.GetPlayer(slot);
+
+			if (currentPlayer == null || !currentPlayer.IsValid)
+				return;
+
+			var currentArenaPlayer = _playerManager.GetPlayer(currentPlayer);
+
+			if (currentArenaPlayer?.CurrentArena != arena)
+				return;
+
+			if (arena.RoundGeneration != roundGeneration ||
+				arena.CurrentRoundType != roundType ||
+				!roundType.TriggerDiscipline)
+				return;
+
+			// Jeśli licznik trafień się nie zwiększył, strzał był pudłem.
+			if (_triggerHitBullets.GetValueOrDefault(slot) > hitsBeforeShot)
+				return;
+
+			var pawn = currentPlayer.PlayerPawn;
+
+			if (pawn == null || !pawn.IsValid || pawn.Health <= 0)
+				return;
+
+			int damage = roundType.TriggerDisciplineDamage;
+
+			if (pawn.Health <= damage)
+			{
+				pawn.CommitSuicide(false, true);
+				return;
+			}
+
+			pawn.Health -= damage;
+			pawn.HealthUpdated();
+			
+			Core.Logger.LogInformation(
+				"[TriggerDiscipline] MISS: {Player} | Weapon: {WeaponType} | HP: {Health}",
+				currentPlayer.Controller?.PlayerName,
+				weaponType,
+				pawn.Health
+			);
+		});
+
+		return HookResult.Continue;
+	}
 
 	private void HookOnTakeDamage(ref TakeDamageEntityPreContext ctx)
 	{
@@ -522,6 +603,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_duelService.Clear();
 		_playerManager.Clear();
 		_arenaManager.Shutdown();
+
+		ClearAllTriggerShots();
 	}
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
@@ -571,6 +654,9 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		if (@event.Reason == (short)ENetworkDisconnectionReason.NETWORK_DISCONNECT_SHUTDOWN)
 			return HookResult.Continue;
 
+		ClearTriggerShots(@event.UserId);
+		_triggerHitBullets.Remove(@event.UserId);
+
 		_duelService.HandlePlayerDisconnect(@event.UserId);
 
 		var player = Core.PlayerManager.GetPlayer(@event.UserId);
@@ -591,6 +677,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private HookResult OnRoundPrestart(EventRoundPrestart ev)
 	{
+		ClearAllTriggerShots();
+		_triggerHitBullets.Clear();
 		if (Core.EntitySystem.GetGameRules()?.WarmupPeriod == true)
 			return HookResult.Continue;
 
@@ -641,7 +729,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	{
 		_arenaManager.IsBetweenRounds = true;
 		_duelService.HandleRoundEnd(ev, _pluginTerminatedRound);
-
+		ClearAllTriggerShots();
+		_triggerHitBullets.Clear();
 		foreach (var arena in _arenaManager.Arenas)
 		{
 			if (arena.IsDuelArena)
@@ -714,7 +803,13 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 	private HookResult OnPlayerDeath(EventPlayerDeath ev)
 	{
+		var player = ev.UserIdPlayer;
+
+		if (player != null)
+			ClearTriggerShots(player.PlayerID);
+
 		Core.Scheduler.DelayBySeconds(1f, TerminateRoundIfPossible);
+
 		return HookResult.Continue;
 	}
 
@@ -806,6 +901,26 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 		if (victimArena == null)
 			return HookResult.Continue;
+
+		// Trigger Discipline: zaliczamy wyłącznie trafienie przeciwnika
+		// znajdującego się na tej samej arenie.
+		if (attackerArena != null &&
+			attackerArena == victimArena &&
+			attackerArena.CurrentRoundType?.TriggerDiscipline == true)
+		{
+			var attackerTeam = attackerArena.GetPlayerTeam(attacker);
+			var victimTeam = attackerArena.GetPlayerTeam(victim);
+
+			if (attackerTeam != 0 &&
+				victimTeam != 0 &&
+				attackerTeam != victimTeam)
+			{
+				var slot = attacker.Slot;
+
+				_triggerHitBullets[slot] =
+					_triggerHitBullets.GetValueOrDefault(slot) + 1;
+			}
+		}
 
 		if (Config.CurrentValue.Compatibility.BlockDamageOfNotOpponent &&
 			attackerArena != victimArena)
@@ -1478,5 +1593,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		return allowedHitgroups.Any(x =>
 			x.Equals(hitgroupName, StringComparison.OrdinalIgnoreCase));
 	}
+
+
 
 }
