@@ -180,8 +180,6 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		// Block MVP event
 		Core.GameEvent.HookPre<EventRoundMvp>(OnRoundMvp);
 
-
-
 		if (Config.CurrentValue.Compatibility.BlockFlashOfNotOpponent)
 		{
 			Core.GameEvent.HookPost<EventPlayerBlind>(OnPlayerBlind);

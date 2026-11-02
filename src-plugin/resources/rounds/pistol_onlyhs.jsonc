@@ -1,7 +1,6 @@
-
 {
   // Translation key for the round name
-  "name": "k4.rounds.modifiertest",
+  "name": "k4.rounds.pistol_onlyhs",
 
   // Team size (1 = 1v1, 2 = 2v2, etc.)
   "teamSize": 1,
@@ -14,30 +13,17 @@
   "secondaryWeapon": null,
 
   // Use player's preferred weapons from their preferences
-  "usePreferredPrimary": true,
+  "usePreferredPrimary": false,
   "usePreferredSecondary": true,
 
   // Primary weapon preference type: RIFLE, SNIPER_RIFLE, SHOTGUN, SMG, LMG, PISTOL
-  "primaryPreference": "RIFLE",
+  "primaryPreference": null,
 
   // Equipment
-  "armor": true,
-  "helmet": true,
+  "armor": false,
+  "helmet": false,
   "health": 100,
-
   // Allowed hitgroups: All, Generic, Head, Chest, Stomach,
   // LeftArm, RightArm, LeftLeg, RightLeg, Neck, Gear
-  "damageHitgroups": ["Head"],
-
-  // Player model scale (1.0 = default)
-  "playerScale": 1.2,
-
-  // Player gravity multiplier (1.0 = default)
-  "playerGravity": 0.8,
-
-  // Player movement speed multiplier (1.0 = default)
-  "playerSpeed": 1.2,
-
-  // Whether the crosshair is enabled
-  "crosshairEnabled": true
+  "damageHitgroups": ["Head"]
 }
