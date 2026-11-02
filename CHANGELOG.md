@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - damageHitGroups [All, Generic, Head, Chest, Stomach, LeftArm, RightArm, LeftLeg, RightLeg, Neck, Gear]
   - playerScale (float),
   - playerGravity (float),
-  - crosshairEnabled (boolean)
+  - crosshairEnabled (boolean),
+  - Trigger Discipline ("triggerDiscipline": true, "TriggerDisciplineDamage": 50),
   - Best example of current round modifiers are in src-plugin/resources/rounds/giant.jsonc
 - Changed a little bit PrintToHTML - now hardcoded for 6 seconds to be visible after new round.
 - Fixed clantags,

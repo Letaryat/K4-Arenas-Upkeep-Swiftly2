@@ -1,4 +1,3 @@
-# Important notice!
 > [!IMPORTANT]  
 > [K4ryuu](https://github.com/K4ryuu) is the creator of this plugin.<br>
 > Since he is no longer maintaining his CS2 plugins, I forked the fork from [Shmitzas](https://github.com/shmitzas/K4-Arenas-Upkeep). New features are mostly vibecoded but tested.
