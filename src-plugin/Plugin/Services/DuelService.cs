@@ -653,8 +653,9 @@ public sealed partial class Plugin
 		{
 			var localizer = Core.Translation.GetPlayerLocalizer(challenger);
 			var players = Core.PlayerManager.GetAllPlayers()
-				//.Where(p => p.PlayerID != challenger.PlayerID && GetWaitingDuelPlayer(p) != null)
-				.Where(p => p.PlayerID != challenger.PlayerID)
+				.Where(p => p.PlayerID != challenger.PlayerID && GetWaitingDuelPlayer(p) != null)
+				// For testing with bots \/
+				//.Where(p => p.PlayerID != challenger.PlayerID)
 				.ToList();
 
 			if (players.Count == 0)
@@ -712,8 +713,10 @@ public sealed partial class Plugin
 
 			foreach (var roundType in roundTypes)
 			{
-				var selectedWeapon = roundType.Name.Replace("k4.rounds.", "");
-				var option = new ButtonMenuOption(selectedWeapon);
+				var selectedWeapon = roundType.Name;
+				var localizedName = localizer[selectedWeapon];
+
+				var option = new ButtonMenuOption(localizedName);
 
 				option.Click += (_, _) =>
 				{
@@ -760,6 +763,7 @@ public sealed partial class Plugin
 						StartDuel(challenger, opponent, weaponType, selectedRounds);
 					});
 
+					Core.MenusAPI.CloseActiveMenu(challenger);
 					return ValueTask.CompletedTask;
 				};
 				menuBuilder.AddOption(option);
@@ -801,7 +805,7 @@ public sealed partial class Plugin
 				return;
 			}
 
-			var roundType = RoundTypes.GetByName($"k4.rounds.{weaponType}");
+			var roundType = RoundTypes.GetByName(weaponType);
 
 			if (roundType == null || roundType.TeamSize != 1)
 			{
@@ -843,12 +847,14 @@ public sealed partial class Plugin
 			var challengerName = challenger.Controller?.PlayerName ?? "Player";
 			var opponentName = opponent.Controller?.PlayerName ?? "Player";
 
+			var weaponDisplayName = challengerLocalizer[$"k4.rounds.{weaponType}"];
+
 			challenger.SendChat(
 				//$"{challengerLocalizer["k4.general.prefix"]} Challenge sent to {opponentName} ({weaponType}, best of {rounds}). Waiting for acceptance.");
-				$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challengesent", opponentName, weaponType, rounds]}");
+				$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challengesent", opponentName, weaponDisplayName, rounds]}");
 			opponent.SendChat(
 				//$"{opponentLocalizer["k4.general.prefix"]} {challengerName} challenged you ({weaponType}, best of {rounds}). Type !accept within 20 seconds to accept.");
-				$"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challengenotification", challengerName, weaponType, rounds]}");
+				$"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challengenotification", challengerName, weaponDisplayName, rounds]}");
 
 			_ = WaitForChallengeTimeout(request);
 
@@ -874,10 +880,12 @@ public sealed partial class Plugin
 			var challengerName = duel.Challenger.Controller?.PlayerName ?? "Player";
 			var opponentName = duel.Opponent.Controller?.PlayerName ?? "Player";
 
+			var weaponDisplayName = challengerLocalizer[$"k4.rounds.{duel.WeaponType}"];
+
 			duel.Challenger.SendChat(
 								//$"{challengerLocalizer["k4.general.prefix"]} Duel started vs {opponentName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
-								$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challangeNotification", opponentName, duel.WeaponType, duel.TotalRounds]}");
-			duel.Opponent.SendChat($"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challangeNotification", challengerName, duel.WeaponType, duel.TotalRounds]}");
+								$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challangeNotification", opponentName, weaponDisplayName, duel.TotalRounds]}");
+			duel.Opponent.SendChat($"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challangeNotification", challengerName, weaponDisplayName, duel.TotalRounds]}");
 		}
 
 		public HashSet<ArenaPlayer> AssignPendingChallenges(List<ArenaPlayer> players)
