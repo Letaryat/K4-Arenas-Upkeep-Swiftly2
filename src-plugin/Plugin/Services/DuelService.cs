@@ -805,7 +805,9 @@ public sealed partial class Plugin
 				return;
 			}
 
-			var roundType = RoundTypes.GetByName(weaponType);
+			var duel = new DuelMatch(challenger, opponent, weaponType, rounds);
+
+			var roundType = RoundTypes.GetByName(duel.WeaponType);
 
 			if (roundType == null || roundType.TeamSize != 1)
 			{
@@ -817,7 +819,7 @@ public sealed partial class Plugin
 				return;
 			}
 
-			var duel = new DuelMatch(challenger, opponent, weaponType, rounds);
+
 			var request = new DuelInvitation(duel);
 
 			if (!_challengeRequests.TryAdd(duel.Id, request))
@@ -884,8 +886,8 @@ public sealed partial class Plugin
 
 			duel.Challenger.SendChat(
 								//$"{challengerLocalizer["k4.general.prefix"]} Duel started vs {opponentName} ({duel.WeaponType}, best of {duel.TotalRounds}).");
-								$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challangeNotification", opponentName, weaponDisplayName, duel.TotalRounds]}");
-			duel.Opponent.SendChat($"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challangeNotification", challengerName, weaponDisplayName, duel.TotalRounds]}");
+								$"{challengerLocalizer["k4.general.prefix"]} {challengerLocalizer["k4.challenger.challengeNotificationAccepted", opponentName, weaponDisplayName, duel.TotalRounds]}");
+			duel.Opponent.SendChat($"{opponentLocalizer["k4.general.prefix"]} {opponentLocalizer["k4.opponent.challengeNotification", challengerName, weaponDisplayName, duel.TotalRounds]}");
 		}
 
 		public HashSet<ArenaPlayer> AssignPendingChallenges(List<ArenaPlayer> players)
@@ -931,13 +933,18 @@ public sealed partial class Plugin
 					continue;
 				}
 
-				var roundType = RoundTypes.GetByName($"k4.rounds.{duel.WeaponType}");
+				var roundType = RoundTypes.GetByName(duel.WeaponType);
 
 				if (roundType == null || roundType.TeamSize != 1)
 				{
-					CancelPendingDuel(
-						duel,
-						"Challenge cancelled: the selected weapon mode is unavailable.");
+					Core.Logger.LogError(
+						"[Duel DEBUG] Invalid weapon mode. DuelId={DuelId}, WeaponType='{WeaponType}', Found={Found}, TeamSize={TeamSize}",
+						duel.Id,
+						duel.WeaponType,
+						roundType != null,
+						roundType?.TeamSize ?? -1);
+
+						CancelPendingDuel(duel, "k4.duels.weaponnotavailable");
 
 					continue;
 				}

@@ -12,6 +12,9 @@ public sealed partial class Plugin
 	/// Spawn location with position and angle - simple struct for teleport data
 	/// </summary>
 	public readonly record struct SpawnLocation(Vector Position, QAngle Angle);
+	private readonly Vector defaultMins = new Vector(-16, -16, 0);
+	private readonly Vector defaultMaxs = new Vector(16,16,72);
+			
 
 	/// <summary>
 	/// An arena where two teams duke it out. Holds spawn points and player refs,
@@ -231,10 +234,35 @@ public sealed partial class Plugin
 			player.SetupWeapons(roundType);
 
 			CrosshairModifier(player, roundType.CrosshairEnabled);
-			PlayerScaleModifier(player, roundType.PlayerScale);
+
 			GravityModifier(player, roundType.PlayerGravity);
 			//SpeedModifier(player, roundType.PlayerSpeed);
 
+			//ChangePlayerScale(player, roundType.PlayerScale);
+
+			if (roundType.PlayerScale > 1.0)
+			{
+				PlayerScaleModifierBig(player, roundType.PlayerScale);
+			}
+			else
+			{
+				ChangePlayerScale(player, roundType.PlayerScale);
+			}
+
+			/*
+			Core.Scheduler.NextTick(() =>
+			{
+				if (roundType.PlayerScale > 1.0)
+				{
+					PlayerScaleModifierBig(player, roundType.PlayerScale);
+				}
+				else
+				{
+					PlayerScaleModifierSmoll(player, roundType.PlayerScale);
+				}
+
+			});
+			*/
 			if (roundType.IsSpecialRound)
 				roundType.OnPlayerSpawn?.Invoke(player.Player);
 		}
@@ -278,7 +306,7 @@ public sealed partial class Plugin
 					var isChallenger = player.PlayerId == duel.Challenger.PlayerID;
 					var playerScore = isChallenger ? duel.ChallengerScore : duel.OpponentScore;
 					var opponentScore = isChallenger ? duel.OpponentScore : duel.ChallengerScore;
-					arenaName = "CHALLANGE";
+					arenaName = localizer["k4.rounds.challenge"];
 					if (!duel.StartMessageSent && (opponentScore == 0 && playerScore == 0))
 					{
 						player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
@@ -439,39 +467,135 @@ public sealed partial class Plugin
 
 			pawn.HideHUDUpdated();
 		}
-		private void PlayerScaleModifier(ArenaPlayer player, float scale)
-		{
 
+		// I have fucking no idea how to do it with one method so I make 2 one from small models one for big ones.
+		// In either method if one worked, the other one had hitboxes fucked up.
+		private void PlayerScaleModifierBig(ArenaPlayer player, float scale)
+		{
 			if (!player.IsValid)
 				return;
 
 			var pawn = player.Player.PlayerPawn;
-			if (pawn == null)
+
+			if (pawn == null || !pawn.IsValid)
+			{
 				return;
-
-			// Skalowanie modelu
-			pawn.SetScale(scale);
-
-			if(scale == 1.0) return;
-
-			// Collision stuff from: https://gitlab.com/cs2-server-plugins/cs2-minihumans/
-
-			const float HalfXY = 16f;
-			const float StandMaxZ = 72f;
+			}
 
 			var collision = pawn.Collision;
+
 			if (collision == null)
+			{
+				return;
+			}
+
+			var origMins = pawn.Collision.Mins;
+			var origMaxs = pawn.Collision.Maxs;
+			var origRadius = pawn.Collision.BoundingRadius;
+
+			pawn.SetScale(scale);
+
+			Core.PlayerManager.SendChat($"1 - {pawn.Collision.Mins} | {pawn.Collision.Maxs} | {pawn.Collision.BoundingRadius} | {player.Player.Controller.PlayerName} | {scale}");
+
+			pawn.Collision.Mins = origMins * scale;
+			pawn.Collision.Maxs = origMaxs * scale;
+			pawn.Collision.BoundingRadius = origRadius * scale;
+
+			Core.Scheduler.NextTick(() =>
+			{
+
+				collision.MinsUpdated();
+				collision.MaxsUpdated();
+
+				pawn.CollisionRulesChanged();
+				pawn.CollisionUpdated();
+				pawn.CBodyComponentUpdated();
+			});
+
+			var model = pawn.GetModel();
+			if (model == null) return;
+			pawn.SetModel(model);
+
+
+		}
+
+		private void PlayerScaleModifierSmoll(ArenaPlayer player, float scale)
+		{
+			if (!player.IsValid)
 				return;
 
-			float half = HalfXY * scale;
-			float maxZ = StandMaxZ * scale;
+			var pawn = player.Player.PlayerPawn;
 
-			collision.Mins = new Vector(-half, -half, 0f);
-			collision.Maxs = new Vector(half, half, maxZ);
+			if (pawn == null || !pawn.IsValid)
+			{
+				return;
+			}
 
-			collision.MinsUpdated();
-			collision.MaxsUpdated();
+			var collision = pawn.Collision;
+
+			if (collision == null)
+			{
+				return;
+			}
+
+			var cbody = pawn.CBodyComponent;
+			if (cbody == null)
+				return;
+
+			var sceneNode = cbody.SceneNode;
+			if (sceneNode == null)
+				return;
+
+			var skeleton = sceneNode.GetSkeletonInstance();
+			skeleton.Scale = scale;
+
+			Core.Scheduler.NextTick(() =>
+			{
+				pawn.CBodyComponentUpdated();
+				sceneNode.ScaleUpdated();
+				skeleton.ScaleUpdated();
+			});
 		}
+
+		private void ChangePlayerScale(ArenaPlayer player, float scale)
+		{
+			if (!player.IsValid || scale <= 0f)
+				return;
+
+			var pawn = player.Player.PlayerPawn;
+
+			if (pawn == null || !pawn.IsValid)
+				return;
+
+			var cbody = pawn.CBodyComponent;
+			if (cbody == null)
+				return;
+
+			var sceneNode = cbody.SceneNode;
+			if (sceneNode == null)
+				return;
+
+			var skeleton = sceneNode.GetSkeletonInstance();
+			if (skeleton == null)
+				return;
+
+			// Odpowiednik ustawienia skali SkeletonInstance.
+			skeleton.Scale = scale;
+
+			// Odpowiednik inputu SetScale.
+			pawn.SetScale(scale);
+
+			Core.Scheduler.NextTick(() =>
+			{
+				if (!player.IsValid || !pawn.IsValid)
+					return;
+
+				pawn.CBodyComponentUpdated();
+				sceneNode.ScaleUpdated();
+				skeleton.ScaleUpdated();
+			});
+		}
+
 		private void GravityModifier(ArenaPlayer player, float _scale)
 		{
 			if (!player.IsValid)
@@ -508,7 +632,7 @@ public sealed partial class Plugin
 
 			CrosshairModifier(player, true);
 
-			PlayerScaleModifier(player, 1.0f);
+			PlayerScaleModifierSmoll(player, 1.0f);
 
 			GravityModifier(player, 1.0f);
 

@@ -48,8 +48,8 @@
 
   "k4.menu.rounds.title": "★ Preferencje rund ★",
 
-  "k4.chat.arena_roundstartchallange": "[white]Runda rozpoczęta! Przeciwnik: [lime]{1}[white] | Tryb: [lime]{2}[white] | Wynik: [lime]{4}[white]:[lime]{5}[white] (do {3} rund)",
-  "k4.challenger.challangeNotification": "[white]Twoje wyzwanie zostało przyjęte! Pojedynek z graczem [lime]{0}[white] rozpocznie się wkrótce.",
+  "k4.chat.arena_roundstartchallenge": "[white]Runda rozpoczęta! Przeciwnik: [lime]{1}[white] | Tryb: [lime]{2}[white] | Wynik: [lime]{4}[white]:[lime]{5}[white] (do {3} rund)",
+  "k4.challenger.challengeNotificationAccepted": "[white]Twoje wyzwanie zostało przyjęte! Pojedynek z graczem [lime]{0}[white] rozpocznie się wkrótce.",
   "k4.duels.disabled": "[red]System pojedynków jest obecnie wyłączony.",
   "k4.duels.norequest": "[red]Nie masz żadnego oczekującego wyzwania.",
   "k4.duels.expiredrequest": "[red]To wyzwanie wygasło.",
@@ -91,6 +91,7 @@
   "k4.weapontype.lmg": "Karabin maszynowy",
   "k4.weapontype.pistol": "Pistolet",
 
+  "k4.rounds.challenge": "Wyzwanie",
   "k4.rounds.rifle": "Karabin",
   "k4.rounds.pistol": "Pistolet",
   "k4.rounds.scout": "Scout",

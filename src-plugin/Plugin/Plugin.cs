@@ -261,46 +261,76 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 
 			pawn.Health -= damage;
 			pawn.HealthUpdated();
-			
+			/*
 			Core.Logger.LogInformation(
 				"[TriggerDiscipline] MISS: {Player} | Weapon: {WeaponType} | HP: {Health}",
 				currentPlayer.Controller?.PlayerName,
 				weaponType,
 				pawn.Health
 			);
+			*/
 		});
 
 		return HookResult.Continue;
 	}
 
+
 	private void HookOnTakeDamage(ref TakeDamageEntityPreContext ctx)
 	{
 		if (ctx.Params.Entity is not CBasePlayerPawn pawn)
+		{
 			return;
+		}
 
 		var victim = Core.PlayerManager.GetPlayerFromPawn(pawn);
 
 		if (victim == null || !victim.IsValid)
+		{
 			return;
+		}
 
 		var arenaPlayer = _playerManager.GetPlayer(victim);
+		var arena = arenaPlayer?.CurrentArena;
 
-		if (arenaPlayer?.CurrentArena == null)
+		if (arena == null)
+		{
 			return;
+		}
 
-		var roundType = arenaPlayer.CurrentArena.CurrentRoundType ?? RoundType.Warmup;
+		var currentRoundType = arena.CurrentRoundType;
+		var roundType = currentRoundType ?? RoundType.Warmup;
 
 		var allowedHitgroups = roundType.DamageHitgroups;
+		var actualHitgroup = ctx.Params.Info.ActualHitGroup;
+
+		var isAllowed = IsHitgroupAllowed(
+			actualHitgroup,
+			allowedHitgroups
+		);
+
+		/*
+		Core.Logger.LogInformation(
+			"[HITGROUP DEBUG] Victim={Victim} | RoundTypeNull={RoundTypeNull} | Hitgroup={Hitgroup} | HitgroupValue={HitgroupValue} | Allowed={Allowed} | IsAllowed={IsAllowed}",
+			victim.Controller?.PlayerName,
+			currentRoundType == null,
+			actualHitgroup,
+			(int)actualHitgroup,
+			string.Join(", ", allowedHitgroups),
+			isAllowed
+		);
+		*/
 
 		if (allowedHitgroups.Any(x =>
 			x.Equals("All", StringComparison.OrdinalIgnoreCase)))
+		{
 			return;
+		}
 
-		var actualHitgroup = ctx.Params.Info.ActualHitGroup;
 
-		if (!IsHitgroupAllowed(actualHitgroup, allowedHitgroups))
+		if (!isAllowed)
 			ctx.Params.Info.Damage = 0;
 	}
+
 
 	private HookResult OnMatchStart(EventRoundAnnounceMatchStart eventObj)
 	{

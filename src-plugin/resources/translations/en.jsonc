@@ -50,8 +50,8 @@
   "k4.menu.rounds.title": "★ Round Preferences ★",
 
 
-  "k4.chat.arena_roundstartchallange": "[white]Round started! Opponent: [lime]{1}[white] | Mode: [lime]{2}[white] | Score: [lime]{4}[white]:[lime]{5}[white] (first to {3} rounds)",  
-  "k4.challenger.challangeNotification": "[white]Your challenge has been accepted! Your duel against {0}[white] will begin shortly.",
+  "k4.chat.arena_roundstartchallenge": "[white]Round started! Opponent: [lime]{1}[white] | Mode: [lime]{2}[white] | Score: [lime]{4}[white]:[lime]{5}[white] (first to {3} rounds)",  
+  "k4.challenger.challengeNotificationAccepted": "[white]Your challenge has been accepted! Your duel against {0}[white] will begin shortly.",
   "k4.duels.disabled": "[red]The duel system is currently disabled.",
   "k4.duels.norequest": "[red]You have no pending challenge.",
   "k4.duels.expiredrequest": "[red]This challenge has expired.",
@@ -92,6 +92,7 @@
   "k4.weapontype.lmg": "Machine Gun",
   "k4.weapontype.pistol": "Pistol",
 
+  "k4.rounds.challenge": "Challenge",
   "k4.rounds.rifle": "Rifle",
   "k4.rounds.pistol": "Pistol",
   "k4.rounds.scout": "Scout",
