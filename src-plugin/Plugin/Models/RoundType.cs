@@ -35,7 +35,7 @@ public sealed partial class Plugin
 		public IReadOnlyList<string> DamageHitgroups { get; }
 		public float PlayerScale { get; }
 		public float PlayerGravity { get; }
-		//public float PlayerSpeed { get; }
+		public float PlayerSpeed { get; }
 		public bool CrosshairEnabled { get; }
 
 		public bool TriggerDiscipline { get; }
@@ -69,7 +69,7 @@ public sealed partial class Plugin
 			DamageHitgroups = ["All"];
 			PlayerScale = 1.0f;
 			PlayerGravity = 1.0f;
-			//PlayerSpeed = 1.0f;
+			PlayerSpeed = 1.0f;
 			CrosshairEnabled = true;
 			TriggerDiscipline = false;
 		}
@@ -97,7 +97,7 @@ public sealed partial class Plugin
 			.ToList();
 			PlayerScale = config.PlayerScale;
 			PlayerGravity = config.PlayerGravity;
-			//PlayerSpeed = config.PlayerSpeed;
+			PlayerSpeed = config.PlayerSpeed;
 			CrosshairEnabled = config.CrosshairEnabled;
 			TriggerDiscipline = config.TriggerDiscipline;
 			TriggerDisciplineDamage = config.TriggerDisciplineDamage;
@@ -121,7 +121,7 @@ public sealed partial class Plugin
 			DamageHitgroups = ["All"];
 			PlayerScale = 1.0f;
 			PlayerGravity = 1.0f;
-			//PlayerSpeed = 1.0f;
+			PlayerSpeed = 1.0f;
 			CrosshairEnabled = true;
 			IsSpecialRound = true;
 			TriggerDiscipline = false;

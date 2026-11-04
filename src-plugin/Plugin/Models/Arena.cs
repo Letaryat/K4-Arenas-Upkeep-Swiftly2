@@ -220,9 +220,6 @@ public sealed partial class Plugin
 		/// <summary>
 		/// Sets up a player that just spawned - teleport, weapons, UI, etc.
 		/// </summary>
-		private readonly Dictionary<int, RoundType> _testowa = new();
-
-
 		public void SetupPlayer(ArenaPlayer player)
 		{
 			if (!player.IsValid || player.SpawnLocation is null)
@@ -235,27 +232,11 @@ public sealed partial class Plugin
 			var playerId = player.PlayerId;
 			var playerName = player.Player.Controller.PlayerName;
 
-			// Odczyt poprzedniego typu rundy.
-			if (_testowa.TryGetValue(playerId, out var previousRoundType))
-			{
-				Core.PlayerManager.SendChat(
-					$"[ROUND DEBUG] Player={playerName} | PreviousRound={previousRoundType.Name}"
-				);
-			}
-			else
-			{
-				Core.PlayerManager.SendChat(
-					$"[ROUND DEBUG] Player={playerName} | PreviousRound=NONE"
-				);
-			}
-
-			// Zapamiętanie aktualnego typu rundy.
-			_testowa[playerId] = roundType;
-
 			player.SetupWeapons(roundType);
 
 			CrosshairModifier(player, roundType.CrosshairEnabled);
 			GravityModifier(player, roundType.PlayerGravity);
+			SpeedModifier(player, roundType.PlayerSpeed);
 
 			if (roundType.PlayerScale > 1.0)
 				PlayerScaleModifierBig(player, roundType.PlayerScale);
@@ -493,8 +474,6 @@ public sealed partial class Plugin
 
 			pawn.SetScale(scale);
 
-			Core.PlayerManager.SendChat($"1 - {pawn.Collision.Mins} | {pawn.Collision.Maxs} | {pawn.Collision.BoundingRadius} | {player.Player.Controller.PlayerName} | {scale}");
-
 			pawn.Collision.Mins = origMins * scale;
 			pawn.Collision.Maxs = origMaxs * scale;
 			pawn.Collision.BoundingRadius = origRadius * scale;
@@ -513,7 +492,6 @@ public sealed partial class Plugin
 			var model = pawn.GetModel();
 			if (model == null) return;
 			pawn.SetModel(model);
-
 
 		}
 
@@ -596,7 +574,7 @@ public sealed partial class Plugin
 
 			GravityModifier(player, 1.0f);
 
-			//SpeedModifier(player, 1.0f);
+			SpeedModifier(player, 1.0f);
 		}
 
 	}

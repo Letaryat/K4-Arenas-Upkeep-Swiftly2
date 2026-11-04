@@ -14,7 +14,7 @@
 
   // Use player's preferred weapons from their preferences
   "usePreferredPrimary": false,
-  "usePreferredSecondary": true,
+  "usePreferredSecondary": false,
 
   // Primary weapon preference type: RIFLE, SNIPER_RIFLE, SHOTGUN, SMG, LMG, PISTOL
   "primaryPreference": null,

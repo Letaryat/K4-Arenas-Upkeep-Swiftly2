@@ -20,7 +20,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.2.2", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.2.3", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -93,6 +93,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			_jointeamHookGuid = null;
 		}
 		Core.GameHooks.Entities.TakeDamage.Pre -= HookOnTakeDamage;
+		Core.GameHooks.Pawn.PostThink.Pre -= OnPlayerPawnPostThink;
 
 		_triggerHitBullets.Clear();
 	}
@@ -191,6 +192,64 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		// Hook jointeam command to block unauthorized team switches
 		_jointeamHookGuid = Core.Command.HookClientCommand(OnJoinTeamCommand);
 		Core.GameHooks.Entities.TakeDamage.Pre += HookOnTakeDamage;
+		//Core.GameEvent.HookPost<EventPlayerHurt>(OnPlayerHurtPost);
+		Core.GameHooks.Pawn.PostThink.Pre += OnPlayerPawnPostThink;
+
+	}
+
+	private HookResult OnPlayerHurtPost(EventPlayerHurt eventObj)
+	{
+		var victim = eventObj.UserIdPlayer;
+		if (victim == null || !victim.IsValid) return HookResult.Continue;
+		var pawn = victim.PlayerPawn;
+		if (pawn == null || !pawn.IsValid) return HookResult.Continue;
+
+		var arenaPlayer = _playerManager.GetPlayer(victim);
+
+		if (arenaPlayer == null || !arenaPlayer.IsValid) return HookResult.Continue;
+
+		var arena = arenaPlayer.CurrentArena;
+
+		if (arena == null) return HookResult.Continue;
+
+		var currentRoundType = arena.CurrentRoundType;
+		var roundType = currentRoundType ?? RoundType.Warmup;
+
+		core.Scheduler.DelayBySeconds(0.5f, () =>
+		{
+			SpeedModifier(arenaPlayer, roundType.PlayerSpeed);
+			core.PlayerManager.SendChat("speed hurt post");
+		});
+
+
+		return HookResult.Continue;
+	}
+
+	private void OnPlayerPawnPostThink(ref PostThinkPawnPreContext ctx)
+	{
+		var player = ctx.Params.Player;
+		if (player == null || !player.IsValid) return;
+		var pawn = player.PlayerPawn;
+		if (pawn == null || !pawn.IsValid) return;
+
+		var arenaPlayer = _playerManager.GetPlayer(player);
+
+		if (arenaPlayer == null || !arenaPlayer.IsValid) return;
+
+		var arena = arenaPlayer.CurrentArena;
+
+		if (arena == null) return;
+
+		var currentRoundType = arena.CurrentRoundType;
+		var roundType = currentRoundType ?? RoundType.Warmup;
+
+		if(roundType.PlayerSpeed == 1.0) return;
+
+		if (pawn.VelocityModifier >= roundType.PlayerSpeed) return;
+
+		SpeedModifier(arenaPlayer, roundType.PlayerSpeed);
+
+		return;
 	}
 
 	private HookResult OnWeaponFire(EventWeaponFire ev)
@@ -1624,6 +1683,17 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			x.Equals(hitgroupName, StringComparison.OrdinalIgnoreCase));
 	}
 
+	public void SpeedModifier(ArenaPlayer player, float scale)
+	{
+		if (!player.IsValid)
+			return;
 
+		var pawn = player.Player.PlayerPawn;
+		if (pawn == null)
+			return;
+
+		pawn.VelocityModifier = scale;
+		pawn.VelocityModifierUpdated();
+	}
 
 }

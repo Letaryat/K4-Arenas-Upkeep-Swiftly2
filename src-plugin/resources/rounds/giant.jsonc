@@ -35,6 +35,9 @@
   // Player gravity multiplier (1.0 = default)
   "playerGravity": 1,
 
+  // Player speed multiplier 
+  "playerSpeed": 1,
+
   // Whether the crosshair is enabled
   "crosshairEnabled": true
 }

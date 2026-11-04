@@ -122,7 +122,7 @@ public sealed partial class Plugin
 		/// <summary>
 		/// Player movement speed multiplier. 1.0 = default.
 		/// </summary>
-		//public float PlayerSpeed { get; set; } = 1.0f;
+		public float PlayerSpeed { get; set; } = 1.0f;
 
 		/// <summary>
 		/// Enable or disable crosshair.
