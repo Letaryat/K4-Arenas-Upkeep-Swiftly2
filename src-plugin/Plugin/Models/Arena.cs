@@ -13,8 +13,7 @@ public sealed partial class Plugin
 	/// </summary>
 	public readonly record struct SpawnLocation(Vector Position, QAngle Angle);
 	private readonly Vector defaultMins = new Vector(-16, -16, 0);
-	private readonly Vector defaultMaxs = new Vector(16,16,72);
-			
+	private readonly Vector defaultMaxs = new Vector(16, 16, 72);
 
 	/// <summary>
 	/// An arena where two teams duke it out. Holds spawn points and player refs,
@@ -221,6 +220,9 @@ public sealed partial class Plugin
 		/// <summary>
 		/// Sets up a player that just spawned - teleport, weapons, UI, etc.
 		/// </summary>
+		private readonly Dictionary<int, RoundType> _testowa = new();
+
+
 		public void SetupPlayer(ArenaPlayer player)
 		{
 			if (!player.IsValid || player.SpawnLocation is null)
@@ -230,43 +232,39 @@ public sealed partial class Plugin
 			player.ApplyScoreboardOrder();
 
 			var roundType = CurrentRoundType ?? RoundType.Warmup;
+			var playerId = player.PlayerId;
+			var playerName = player.Player.Controller.PlayerName;
+
+			// Odczyt poprzedniego typu rundy.
+			if (_testowa.TryGetValue(playerId, out var previousRoundType))
+			{
+				Core.PlayerManager.SendChat(
+					$"[ROUND DEBUG] Player={playerName} | PreviousRound={previousRoundType.Name}"
+				);
+			}
+			else
+			{
+				Core.PlayerManager.SendChat(
+					$"[ROUND DEBUG] Player={playerName} | PreviousRound=NONE"
+				);
+			}
+
+			// Zapamiętanie aktualnego typu rundy.
+			_testowa[playerId] = roundType;
 
 			player.SetupWeapons(roundType);
 
 			CrosshairModifier(player, roundType.CrosshairEnabled);
-
 			GravityModifier(player, roundType.PlayerGravity);
-			//SpeedModifier(player, roundType.PlayerSpeed);
-
-			//ChangePlayerScale(player, roundType.PlayerScale);
 
 			if (roundType.PlayerScale > 1.0)
-			{
 				PlayerScaleModifierBig(player, roundType.PlayerScale);
-			}
 			else
-			{
 				ChangePlayerScale(player, roundType.PlayerScale);
-			}
 
-			/*
-			Core.Scheduler.NextTick(() =>
-			{
-				if (roundType.PlayerScale > 1.0)
-				{
-					PlayerScaleModifierBig(player, roundType.PlayerScale);
-				}
-				else
-				{
-					PlayerScaleModifierSmoll(player, roundType.PlayerScale);
-				}
-
-			});
-			*/
 			if (roundType.IsSpecialRound)
 				roundType.OnPlayerSpawn?.Invoke(player.Player);
 		}
-
 
 
 		/// <summary>
@@ -519,44 +517,6 @@ public sealed partial class Plugin
 
 		}
 
-		private void PlayerScaleModifierSmoll(ArenaPlayer player, float scale)
-		{
-			if (!player.IsValid)
-				return;
-
-			var pawn = player.Player.PlayerPawn;
-
-			if (pawn == null || !pawn.IsValid)
-			{
-				return;
-			}
-
-			var collision = pawn.Collision;
-
-			if (collision == null)
-			{
-				return;
-			}
-
-			var cbody = pawn.CBodyComponent;
-			if (cbody == null)
-				return;
-
-			var sceneNode = cbody.SceneNode;
-			if (sceneNode == null)
-				return;
-
-			var skeleton = sceneNode.GetSkeletonInstance();
-			skeleton.Scale = scale;
-
-			Core.Scheduler.NextTick(() =>
-			{
-				pawn.CBodyComponentUpdated();
-				sceneNode.ScaleUpdated();
-				skeleton.ScaleUpdated();
-			});
-		}
-
 		private void ChangePlayerScale(ArenaPlayer player, float scale)
 		{
 			if (!player.IsValid || scale <= 0f)
@@ -632,7 +592,7 @@ public sealed partial class Plugin
 
 			CrosshairModifier(player, true);
 
-			PlayerScaleModifierSmoll(player, 1.0f);
+			ChangePlayerScale(player, 1.0f);
 
 			GravityModifier(player, 1.0f);
 
