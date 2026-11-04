@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v1.2.3] - 2026-11-04
 - Changed scaling modifier - now it should work fine with different scaling and hitboxes,
-- Added playerSpeed modifier
+- Added playerSpeed modifier,
+- Complete code restructure using opencode,
 
 ## [v1.2.2] - 2026-11-02
 - Fixed issues with crashing,
@@ -16,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Polish translation,
 - Added !duel and challenge system,
 - Ported Auto Bot Fill from Cruze from CSS version when players are uneven on the server,
+- Added proper scoreboard segregation, 
 - Added new modifiers for a rounds which are:
   - damageHitGroups [All, Generic, Head, Chest, Stomach, LeftArm, RightArm, LeftLeg, RightLeg, Neck, Gear]
   - playerScale (float),
