@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace K4Arenas;
+namespace K4Arenas.Database.Models;
 
 /// <summary>
 /// Database weapon preference record - Dommel entity for k4_arenas_weapons table

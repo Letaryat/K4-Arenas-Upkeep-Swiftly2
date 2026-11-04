@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.3] - 2026-11-04
+- Changed scaling modifier - now it should work fine with different scaling and hitboxes,
+- Added playerSpeed modifier
+
 ## [v1.2.2] - 2026-11-02
 - Fixed issues with crashing,
 - Fixed issue that server would crash when mp_warmup_online_enabled 0

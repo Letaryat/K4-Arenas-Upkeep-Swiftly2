@@ -8,13 +8,11 @@ using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
-namespace K4Arenas;
+namespace K4Arenas.Services;
 
-public sealed partial class Plugin
+public sealed class DuelService
 {
-	public sealed class DuelService
-	{
-		private readonly ConcurrentDictionary<int, DuelMatch> _activeDuels = new();
+	private readonly ConcurrentDictionary<int, DuelMatch> _activeDuels = new();
 		private readonly ConcurrentDictionary<int, DuelMatch> _pendingDuels = new();
 		private readonly ConcurrentDictionary<int, DuelInvitation> _challengeRequests = new();
 		private readonly PlayerManager _playerManager;
@@ -1121,8 +1119,6 @@ public sealed partial class Plugin
 				duel.Challenger.PlayerID,
 				duel.Opponent.PlayerID);
 
-			return true;
-		}
-
+		return true;
 	}
 }

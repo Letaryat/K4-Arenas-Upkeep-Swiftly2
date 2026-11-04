@@ -1,338 +1,309 @@
 using Dommel;
 using K4Arenas.Database.Migrations;
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Helpers;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
-namespace K4Arenas;
+namespace K4Arenas.Services;
 
-public sealed partial class Plugin
+/// <summary>
+/// Handles player preference persistence in database (MySQL, PostgreSQL, SQLite)
+/// Only stores non-default values - if preference matches default, it's deleted.
+/// </summary>
+public sealed class DatabaseService
 {
-	/// <summary>
-	/// Handles player preference persistence in database (MySQL, PostgreSQL, SQLite)
-	/// Only stores non-default values - if preference matches default, it's deleted.
-	/// </summary>
-	public sealed class DatabaseService
+	private readonly string _connectionName;
+	private readonly int _purgeDays;
+
+	/// <summary>True if DB is configured and ready</summary>
+	public bool IsEnabled { get; private set; }
+
+	public DatabaseService(string connectionName, int purgeDays)
 	{
-		private readonly string _connectionName;
-		private readonly int _purgeDays;
+		_connectionName = connectionName;
+		_purgeDays = purgeDays;
+	}
 
-		/// <summary>True if DB is configured and ready</summary>
-		public bool IsEnabled { get; private set; }
-
-		public DatabaseService(string connectionName, int purgeDays)
+	/// <summary>Sets up DB connection and runs migrations</summary>
+	public async Task InitializeAsync()
+	{
+		try
 		{
-			_connectionName = connectionName;
-			_purgeDays = purgeDays;
+			using var connection = Core.Database.GetConnection(_connectionName);
+			MigrationRunner.RunMigrations(connection);
+			IsEnabled = true;
+			Core.Logger.LogInformation("Database initialized with migrations.");
 		}
-
-		/// <summary>Sets up DB connection and runs migrations</summary>
-		public async Task InitializeAsync()
+		catch (Exception ex)
 		{
-			try
-			{
-				using var connection = Core.Database.GetConnection(_connectionName);
-				MigrationRunner.RunMigrations(connection);
-				IsEnabled = true;
-				Core.Logger.LogInformation("Database initialized with migrations.");
-			}
-			catch (Exception ex)
-			{
-				Core.Logger.LogError(ex, "Failed to initialize database. Player preferences will not be saved.");
-				IsEnabled = false;
-			}
+			Core.Logger.LogError(ex, "Failed to initialize database. Player preferences will not be saved.");
+			IsEnabled = false;
 		}
+	}
 
-		/// <summary>
-		/// Loads player prefs from DB. Auto-cleans prefs for deleted rounds.
-		/// </summary>
-		public async Task<bool> LoadPlayerAsync(ArenaPlayer player)
+	/// <summary>Loads player prefs from DB. Auto-cleans prefs for deleted rounds.</summary>
+	public async Task<bool> LoadPlayerAsync(ArenaPlayer player)
+	{
+		if (!IsEnabled)
+			return false;
+
+		var steamId = (long)player.SteamId;
+
+		try
 		{
-			if (!IsEnabled)
-				return false;
+			using var connection = Core.Database.GetConnection(_connectionName);
+			connection.Open();
 
-			var steamId = (long)player.SteamId;
+			var dbPlayer = await connection.FirstOrDefaultAsync<DbPlayer>(p => p.SteamId64 == steamId);
 
-			try
+			if (dbPlayer == null)
 			{
-				using var connection = Core.Database.GetConnection(_connectionName);
-				connection.Open();
+				dbPlayer = new DbPlayer { SteamId64 = steamId, LastSeen = DateTime.UtcNow };
+				await connection.InsertAsync(dbPlayer);
+			}
+			else
+			{
+				dbPlayer.LastSeen = DateTime.UtcNow;
+				await connection.UpdateAsync(dbPlayer);
+			}
 
-				var dbPlayer = await connection.FirstOrDefaultAsync<DbPlayer>(p => p.SteamId64 == steamId);
+			var weapons = await connection.SelectAsync<DbWeaponPreference>(w => w.SteamId64 == steamId);
+			var weaponPrefs = new List<(CSWeaponType Type, ItemDefinitionIndex Item)>();
+			foreach (var weapon in weapons)
+			{
+				var weaponType = ParseWeaponType(weapon.WeaponType);
+				if (weaponType.HasValue)
+					weaponPrefs.Add((weaponType.Value, (ItemDefinitionIndex)weapon.WeaponId));
+			}
 
-				if (dbPlayer == null)
+			var rounds = await connection.SelectAsync<DbRoundPreference>(r => r.SteamId64 == steamId);
+			var roundsToDelete = new List<int>();
+
+			var enabledRoundTypes = new HashSet<int>();
+			foreach (var roundType in RoundTypes.All)
+			{
+				if (roundType.EnabledByDefault)
+					enabledRoundTypes.Add(roundType.Id);
+			}
+
+			foreach (var round in rounds)
+			{
+				var roundType = RoundTypes.GetByName(round.RoundName);
+				if (roundType == null)
 				{
-					dbPlayer = new DbPlayer { SteamId64 = steamId, LastSeen = DateTime.UtcNow };
-					await connection.InsertAsync(dbPlayer);
+					roundsToDelete.Add(round.Id);
+					continue;
+				}
+
+				if (round.Enabled)
+					enabledRoundTypes.Add(roundType.Id);
+				else
+					enabledRoundTypes.Remove(roundType.Id);
+			}
+
+			if (roundsToDelete.Count > 0)
+			{
+				foreach (var id in roundsToDelete)
+				{
+					var toDelete = await connection.GetAsync<DbRoundPreference>(id);
+					if (toDelete != null)
+						await connection.DeleteAsync(toDelete);
+				}
+				Core.Logger.LogDebug("Cleaned up {Count} deleted round preferences for {SteamId}", roundsToDelete.Count, steamId);
+			}
+
+			if (enabledRoundTypes.Count == 0)
+			{
+				var first = RoundTypes.All.FirstOrDefault();
+				if (first != null)
+					enabledRoundTypes.Add(first.Id);
+			}
+
+			var tcs = new TaskCompletionSource<bool>();
+			Core.Scheduler.NextTick(() =>
+			{
+				try
+				{
+					foreach (var pref in weaponPrefs)
+						player.SetWeaponPreference(pref.Type, pref.Item);
+
+					player.EnabledRoundTypes.Clear();
+					foreach (var id in enabledRoundTypes)
+						player.EnabledRoundTypes.Add(id);
+
+					player.IsLoaded = true;
+					tcs.TrySetResult(true);
+				}
+				catch (Exception ex)
+				{
+					Core.Logger.LogError(ex, "Failed to apply loaded player preferences for {SteamId}", steamId);
+					tcs.TrySetResult(false);
+				}
+			});
+
+			return await tcs.Task;
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError(ex, "Failed to load player preferences for {SteamId}", steamId);
+		}
+
+		return false;
+	}
+
+	/// <summary>Saves weapon pref. Deletes from DB if set to default (random).</summary>
+	public async Task SaveWeaponPreferenceAsync(ArenaPlayer player, CSWeaponType weaponType, ItemDefinitionIndex? weapon)
+	{
+		if (!IsEnabled || !player.IsLoaded)
+			return;
+
+		var steamId = (long)player.SteamId;
+
+		try
+		{
+			using var connection = Core.Database.GetConnection(_connectionName);
+			connection.Open();
+
+			var weaponTypeStr = GetWeaponTypeString(weaponType);
+			if (weaponTypeStr == null)
+				return;
+
+			var existing = (await connection.SelectAsync<DbWeaponPreference>(w =>
+				w.SteamId64 == steamId && w.WeaponType == weaponTypeStr)).FirstOrDefault();
+
+			if (weapon.HasValue)
+			{
+				if (existing != null)
+				{
+					existing.WeaponId = (int)weapon.Value;
+					await connection.UpdateAsync(existing);
 				}
 				else
 				{
-					dbPlayer.LastSeen = DateTime.UtcNow;
-					await connection.UpdateAsync(dbPlayer);
-				}
-
-				var weapons = await connection.SelectAsync<DbWeaponPreference>(w => w.SteamId64 == steamId);
-				var weaponPrefs = new List<(CSWeaponType Type, ItemDefinitionIndex Item)>();
-				foreach (var weapon in weapons)
-				{
-					var weaponType = ParseWeaponType(weapon.WeaponType);
-					if (weaponType.HasValue)
-						weaponPrefs.Add((weaponType.Value, (ItemDefinitionIndex)weapon.WeaponId));
-				}
-
-				var rounds = await connection.SelectAsync<DbRoundPreference>(r => r.SteamId64 == steamId);
-				var roundsToDelete = new List<int>();
-
-				// Build the result set LOCALLY first - don't touch player.EnabledRoundTypes
-				// from this background thread. It's a plain HashSet<int> and the main game
-				// thread reads/mutates it concurrently (round menu, match setup); writing
-				// to it here was an unsynchronized cross-thread race.
-				var enabledRoundTypes = new HashSet<int>();
-				foreach (var roundType in RoundTypes.All)
-				{
-					if (roundType.EnabledByDefault)
-						enabledRoundTypes.Add(roundType.Id);
-				}
-
-				foreach (var round in rounds)
-				{
-					var roundType = RoundTypes.GetByName(round.RoundName);
-					if (roundType == null)
+					var newPref = new DbWeaponPreference
 					{
-						roundsToDelete.Add(round.Id);
-						continue;
-					}
-
-					if (round.Enabled)
-						enabledRoundTypes.Add(roundType.Id);
-					else
-						enabledRoundTypes.Remove(roundType.Id);
+						SteamId64 = steamId,
+						WeaponType = weaponTypeStr,
+						WeaponId = (int)weapon.Value
+					};
+					await connection.InsertAsync(newPref);
 				}
-
-				if (roundsToDelete.Count > 0)
-				{
-					foreach (var id in roundsToDelete)
-					{
-						var toDelete = await connection.GetAsync<DbRoundPreference>(id);
-						if (toDelete != null)
-							await connection.DeleteAsync(toDelete);
-					}
-					Core.Logger.LogDebug("Cleaned up {Count} deleted round preferences for {SteamId}", roundsToDelete.Count, steamId);
-				}
-
-				if (enabledRoundTypes.Count == 0)
-				{
-					var first = RoundTypes.All.FirstOrDefault();
-					if (first != null)
-						enabledRoundTypes.Add(first.Id);
-				}
-
-				// Everything below touches ArenaPlayer state the main thread also owns -
-				// apply it there instead of from this background thread.
-				var tcs = new TaskCompletionSource<bool>();
-				Core.Scheduler.NextTick(() =>
-				{
-					try
-					{
-						foreach (var pref in weaponPrefs)
-							player.SetWeaponPreference(pref.Type, pref.Item);
-
-						player.EnabledRoundTypes.Clear();
-						foreach (var id in enabledRoundTypes)
-							player.EnabledRoundTypes.Add(id);
-
-						player.IsLoaded = true;
-						tcs.TrySetResult(true);
-					}
-					catch (Exception ex)
-					{
-						Core.Logger.LogError(ex, "Failed to apply loaded player preferences for {SteamId}", steamId);
-						tcs.TrySetResult(false);
-					}
-				});
-
-				return await tcs.Task;
 			}
-			catch (Exception ex)
+			else if (existing != null)
 			{
-				Core.Logger.LogError(ex, "Failed to load player preferences for {SteamId}", steamId);
+				await connection.DeleteAsync(existing);
 			}
-
-			return false;
 		}
-
-		/// <summary>
-		/// Saves weapon pref. Deletes from DB if set to default (random).
-		/// </summary>
-		public async Task SaveWeaponPreferenceAsync(ArenaPlayer player, CSWeaponType weaponType, ItemDefinitionIndex? weapon)
+		catch (Exception ex)
 		{
-			if (!IsEnabled || !player.IsLoaded)
-				return;
+			Core.Logger.LogError(ex, "Failed to save weapon preference for {SteamId}", steamId);
+		}
+	}
 
-			var steamId = (long)player.SteamId;
+	/// <summary>Saves round pref. Only stores if different from EnabledByDefault.</summary>
+	public async Task SaveRoundPreferenceAsync(ArenaPlayer player, RoundType roundType, bool enabled)
+	{
+		if (!IsEnabled || !player.IsLoaded)
+			return;
 
-			try
+		var steamId = (long)player.SteamId;
+
+		try
+		{
+			using var connection = Core.Database.GetConnection(_connectionName);
+			connection.Open();
+
+			var existing = (await connection.SelectAsync<DbRoundPreference>(r =>
+				r.SteamId64 == steamId && r.RoundName == roundType.Name)).FirstOrDefault();
+
+			if (enabled == roundType.EnabledByDefault)
 			{
-				using var connection = Core.Database.GetConnection(_connectionName);
-				connection.Open();
-
-				var weaponTypeStr = GetWeaponTypeString(weaponType);
-				if (weaponTypeStr == null)
-					return;
-
-				// Find existing preference
-				var existing = (await connection.SelectAsync<DbWeaponPreference>(w =>
-					w.SteamId64 == steamId && w.WeaponType == weaponTypeStr)).FirstOrDefault();
-
-				if (weapon.HasValue)
+				if (existing != null)
 				{
-					if (existing != null)
-					{
-						// Update existing
-						existing.WeaponId = (int)weapon.Value;
-						await connection.UpdateAsync(existing);
-					}
-					else
-					{
-						// Insert new
-						var newPref = new DbWeaponPreference
-						{
-							SteamId64 = steamId,
-							WeaponType = weaponTypeStr,
-							WeaponId = (int)weapon.Value
-						};
-						await connection.InsertAsync(newPref);
-					}
-				}
-				else if (existing != null)
-				{
-					// Delete if set to random (default)
 					await connection.DeleteAsync(existing);
 				}
 			}
-			catch (Exception ex)
+			else
 			{
-				Core.Logger.LogError(ex, "Failed to save weapon preference for {SteamId}", steamId);
-			}
-		}
-
-		/// <summary>
-		/// Saves round pref. Only stores if different from EnabledByDefault.
-		/// </summary>
-		public async Task SaveRoundPreferenceAsync(ArenaPlayer player, RoundType roundType, bool enabled)
-		{
-			if (!IsEnabled || !player.IsLoaded)
-				return;
-
-			var steamId = (long)player.SteamId;
-
-			try
-			{
-				using var connection = Core.Database.GetConnection(_connectionName);
-				connection.Open();
-
-				// Find existing preference
-				var existing = (await connection.SelectAsync<DbRoundPreference>(r =>
-					r.SteamId64 == steamId && r.RoundName == roundType.Name)).FirstOrDefault();
-
-				if (enabled == roundType.EnabledByDefault)
+				if (existing != null)
 				{
-					// Matches default, delete from DB
-					if (existing != null)
-					{
-						await connection.DeleteAsync(existing);
-					}
+					existing.Enabled = enabled;
+					await connection.UpdateAsync(existing);
 				}
 				else
 				{
-					if (existing != null)
+					var newPref = new DbRoundPreference
 					{
-						// Update existing
-						existing.Enabled = enabled;
-						await connection.UpdateAsync(existing);
-					}
-					else
-					{
-						// Insert new
-						var newPref = new DbRoundPreference
-						{
-							SteamId64 = steamId,
-							RoundName = roundType.Name,
-							Enabled = enabled
-						};
-						await connection.InsertAsync(newPref);
-					}
+						SteamId64 = steamId,
+						RoundName = roundType.Name,
+						Enabled = enabled
+					};
+					await connection.InsertAsync(newPref);
 				}
 			}
-			catch (Exception ex)
-			{
-				Core.Logger.LogError(ex, "Failed to save round preference for {SteamId}", steamId);
-			}
 		}
-
-		/// <summary>
-		/// Removes old player records and their associated preferences
-		/// </summary>
-		public async Task PurgeOldRecordsAsync()
+		catch (Exception ex)
 		{
-			if (!IsEnabled || _purgeDays <= 0)
-				return;
-
-			try
-			{
-				using var connection = Core.Database.GetConnection(_connectionName);
-				connection.Open();
-
-				var cutoffDate = DateTime.UtcNow.AddDays(-_purgeDays);
-				var oldPlayers = await connection.SelectAsync<DbPlayer>(p => p.LastSeen < cutoffDate);
-				var deletedCount = 0;
-
-				foreach (var player in oldPlayers)
-				{
-					// Delete associated weapon preferences
-					var weapons = await connection.SelectAsync<DbWeaponPreference>(w => w.SteamId64 == player.SteamId64);
-					foreach (var weapon in weapons)
-						await connection.DeleteAsync(weapon);
-
-					// Delete associated round preferences
-					var rounds = await connection.SelectAsync<DbRoundPreference>(r => r.SteamId64 == player.SteamId64);
-					foreach (var round in rounds)
-						await connection.DeleteAsync(round);
-
-					// Delete player
-					await connection.DeleteAsync(player);
-					deletedCount++;
-				}
-
-				if (deletedCount > 0)
-					Core.Logger.LogInformation("Purged {Count} old player records from database.", deletedCount);
-			}
-			catch (Exception ex)
-			{
-				Core.Logger.LogError(ex, "Failed to purge old records from database.");
-			}
+			Core.Logger.LogError(ex, "Failed to save round preference for {SteamId}", steamId);
 		}
-
-		private static string? GetWeaponTypeString(CSWeaponType type) => type switch
-		{
-			CSWeaponType.WEAPONTYPE_RIFLE => "rifle",
-			CSWeaponType.WEAPONTYPE_SNIPER_RIFLE => "sniper",
-			CSWeaponType.WEAPONTYPE_SHOTGUN => "shotgun",
-			CSWeaponType.WEAPONTYPE_SUBMACHINEGUN => "smg",
-			CSWeaponType.WEAPONTYPE_MACHINEGUN => "lmg",
-			CSWeaponType.WEAPONTYPE_PISTOL => "pistol",
-			_ => null
-		};
-
-		private static CSWeaponType? ParseWeaponType(string type) => type switch
-		{
-			"rifle" => CSWeaponType.WEAPONTYPE_RIFLE,
-			"sniper" => CSWeaponType.WEAPONTYPE_SNIPER_RIFLE,
-			"shotgun" => CSWeaponType.WEAPONTYPE_SHOTGUN,
-			"smg" => CSWeaponType.WEAPONTYPE_SUBMACHINEGUN,
-			"lmg" => CSWeaponType.WEAPONTYPE_MACHINEGUN,
-			"pistol" => CSWeaponType.WEAPONTYPE_PISTOL,
-			_ => null
-		};
 	}
+
+	/// <summary>Removes old player records and their associated preferences</summary>
+	public async Task PurgeOldRecordsAsync()
+	{
+		if (!IsEnabled || _purgeDays <= 0)
+			return;
+
+		try
+		{
+			using var connection = Core.Database.GetConnection(_connectionName);
+			connection.Open();
+
+			var cutoffDate = DateTime.UtcNow.AddDays(-_purgeDays);
+			var oldPlayers = await connection.SelectAsync<DbPlayer>(p => p.LastSeen < cutoffDate);
+			var deletedCount = 0;
+
+			foreach (var player in oldPlayers)
+			{
+				var weapons = await connection.SelectAsync<DbWeaponPreference>(w => w.SteamId64 == player.SteamId64);
+				foreach (var weapon in weapons)
+					await connection.DeleteAsync(weapon);
+
+				var rounds = await connection.SelectAsync<DbRoundPreference>(r => r.SteamId64 == player.SteamId64);
+				foreach (var round in rounds)
+					await connection.DeleteAsync(round);
+
+				await connection.DeleteAsync(player);
+				deletedCount++;
+			}
+
+			if (deletedCount > 0)
+				Core.Logger.LogInformation("Purged {Count} old player records from database.", deletedCount);
+		}
+		catch (Exception ex)
+		{
+			Core.Logger.LogError(ex, "Failed to purge old records from database.");
+		}
+	}
+
+	private static string? GetWeaponTypeString(CSWeaponType type) => type switch
+	{
+		CSWeaponType.WEAPONTYPE_RIFLE => "rifle",
+		CSWeaponType.WEAPONTYPE_SNIPER_RIFLE => "sniper",
+		CSWeaponType.WEAPONTYPE_SHOTGUN => "shotgun",
+		CSWeaponType.WEAPONTYPE_SUBMACHINEGUN => "smg",
+		CSWeaponType.WEAPONTYPE_MACHINEGUN => "lmg",
+		CSWeaponType.WEAPONTYPE_PISTOL => "pistol",
+		_ => null
+	};
+
+	private static CSWeaponType? ParseWeaponType(string type) => type switch
+	{
+		"rifle" => CSWeaponType.WEAPONTYPE_RIFLE,
+		"sniper" => CSWeaponType.WEAPONTYPE_SNIPER_RIFLE,
+		"shotgun" => CSWeaponType.WEAPONTYPE_SHOTGUN,
+		"smg" => CSWeaponType.WEAPONTYPE_SUBMACHINEGUN,
+		"lmg" => CSWeaponType.WEAPONTYPE_MACHINEGUN,
+		"pistol" => CSWeaponType.WEAPONTYPE_PISTOL,
+		_ => null
+	};
 }

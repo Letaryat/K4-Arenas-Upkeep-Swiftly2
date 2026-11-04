@@ -1,195 +1,188 @@
 using K4ArenaSharedApi;
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Helpers;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
-namespace K4Arenas;
+namespace K4Arenas.Models;
 
-public sealed partial class Plugin
+/// <summary>
+/// Round type definition - file-based or API-registered
+/// </summary>
+public sealed class RoundType
 {
-	/// <summary>
-	/// Round type definition - file-based or API-registered
-	/// </summary>
-	public sealed class RoundType
+	private static int _nextId;
+	private static RoundType? _warmup;
+
+	public int Id { get; }
+	public string Name { get; }
+	public int TeamSize { get; }
+	public bool EnabledByDefault { get; }
+	public int Health { get; }
+	public bool Armor { get; }
+	public bool Helmet { get; }
+	public ItemDefinitionIndex? PrimaryWeapon { get; }
+	public ItemDefinitionIndex? SecondaryWeapon { get; }
+	public bool IsSpecialRound { get; }
+
+	public CSWeaponType? PrimaryPreference { get; }
+	public bool UsePreferredPrimary { get; }
+	public bool UsePreferredSecondary { get; }
+
+	public IReadOnlyList<string> DamageHitgroups { get; }
+	public float PlayerScale { get; }
+	public float PlayerGravity { get; }
+	public float PlayerSpeed { get; }
+	public bool CrosshairEnabled { get; }
+
+	public bool TriggerDiscipline { get; }
+	public int TriggerDisciplineDamage { get; }
+
+	public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundStart { get; }
+	public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundEnd { get; }
+	public Action<IPlayer>? OnPlayerSpawn { get; }
+
+	/// <summary>Default warmup round type (player preference for both weapons)</summary>
+	public static RoundType Warmup => _warmup ??= new RoundType(
+		name: "warmup",
+		teamSize: 1,
+		usePreferredPrimary: true,
+		usePreferredSecondary: true
+	);
+
+	private RoundType(string name, int teamSize = 1, bool usePreferredPrimary = false, bool usePreferredSecondary = false)
 	{
-		private static int _nextId;
-		private static RoundType? _warmup;
+		Id = -1;
+		Name = name;
+		TeamSize = teamSize;
+		UsePreferredPrimary = usePreferredPrimary;
+		UsePreferredSecondary = usePreferredSecondary;
+		Armor = true;
+		Helmet = true;
+		Health = 100;
+		EnabledByDefault = true;
+		DamageHitgroups = ["All"];
+		PlayerScale = 1.0f;
+		PlayerGravity = 1.0f;
+		PlayerSpeed = 1.0f;
+		CrosshairEnabled = true;
+		TriggerDiscipline = false;
+	}
 
-		public int Id { get; }
-		public string Name { get; }
-		public int TeamSize { get; }
-		public bool EnabledByDefault { get; }
-		public int Health { get; }
-		public bool Armor { get; }
-		public bool Helmet { get; }
-		public ItemDefinitionIndex? PrimaryWeapon { get; }
-		public ItemDefinitionIndex? SecondaryWeapon { get; }
-		public bool IsSpecialRound { get; }
-
-		// file-based only
-		public CSWeaponType? PrimaryPreference { get; }
-		public bool UsePreferredPrimary { get; }
-		public bool UsePreferredSecondary { get; }
-
-		public IReadOnlyList<string> DamageHitgroups { get; }
-		public float PlayerScale { get; }
-		public float PlayerGravity { get; }
-		public float PlayerSpeed { get; }
-		public bool CrosshairEnabled { get; }
-
-		public bool TriggerDiscipline { get; }
-		public int TriggerDisciplineDamage {get;}
-
-		// special round only
-		public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundStart { get; }
-		public Action<IReadOnlyList<IPlayer>?, IReadOnlyList<IPlayer>?>? OnRoundEnd { get; }
-		public Action<IPlayer>? OnPlayerSpawn { get; }
-
-		/// <summary>Default warmup round type (player preference for both weapons)</summary>
-		public static RoundType Warmup => _warmup ??= new RoundType(
-			name: "warmup",
-			teamSize: 1,
-			usePreferredPrimary: true,
-			usePreferredSecondary: true
-
-		);
-
-		private RoundType(string name, int teamSize = 1, bool usePreferredPrimary = false, bool usePreferredSecondary = false)
-		{
-			Id = -1;
-			Name = name;
-			TeamSize = teamSize;
-			UsePreferredPrimary = usePreferredPrimary;
-			UsePreferredSecondary = usePreferredSecondary;
-			Armor = true;
-			Helmet = true;
-			Health = 100;
-			EnabledByDefault = true;
-			DamageHitgroups = ["All"];
-			PlayerScale = 1.0f;
-			PlayerGravity = 1.0f;
-			PlayerSpeed = 1.0f;
-			CrosshairEnabled = true;
-			TriggerDiscipline = false;
-		}
-
-		/// <summary>From file config</summary>
-		public RoundType(RoundFileConfig config)
-		{
-			Id = _nextId++;
-			Name = config.Name;
-			TeamSize = config.TeamSize;
-			EnabledByDefault = config.EnabledByDefault;
-			Health = config.Health;
-			Armor = config.Armor;
-			Helmet = config.Helmet;
-			PrimaryWeapon = Weapons.ParseFromString(config.PrimaryWeapon);
-			SecondaryWeapon = Weapons.ParseFromString(config.SecondaryWeapon);
-			UsePreferredPrimary = config.UsePreferredPrimary;
-			UsePreferredSecondary = config.UsePreferredSecondary;
-			PrimaryPreference = config.GetPrimaryPreferenceType();
-			IsSpecialRound = false;
-			DamageHitgroups = config.DamageHitgroups
+	/// <summary>From file config</summary>
+	public RoundType(RoundFileConfig config)
+	{
+		Id = _nextId++;
+		Name = config.Name;
+		TeamSize = config.TeamSize;
+		EnabledByDefault = config.EnabledByDefault;
+		Health = config.Health;
+		Armor = config.Armor;
+		Helmet = config.Helmet;
+		PrimaryWeapon = Weapons.ParseFromString(config.PrimaryWeapon);
+		SecondaryWeapon = Weapons.ParseFromString(config.SecondaryWeapon);
+		UsePreferredPrimary = config.UsePreferredPrimary;
+		UsePreferredSecondary = config.UsePreferredSecondary;
+		PrimaryPreference = config.GetPrimaryPreferenceType();
+		IsSpecialRound = false;
+		DamageHitgroups = config.DamageHitgroups
 			.Select(x => x.Trim())
 			.Where(x => !string.IsNullOrWhiteSpace(x))
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.ToList();
-			PlayerScale = config.PlayerScale;
-			PlayerGravity = config.PlayerGravity;
-			PlayerSpeed = config.PlayerSpeed;
-			CrosshairEnabled = config.CrosshairEnabled;
-			TriggerDiscipline = config.TriggerDiscipline;
-			TriggerDisciplineDamage = config.TriggerDisciplineDamage;
-		}
-
-		/// <summary>From API config</summary>
-		public RoundType(SpecialRoundConfig config)
-		{
-			Id = _nextId++;
-			Name = config.Name;
-			TeamSize = config.TeamSize;
-			EnabledByDefault = config.EnabledByDefault;
-			Health = config.Health;
-			Armor = config.Armor;
-			Helmet = config.Helmet;
-			PrimaryWeapon = config.PrimaryWeapon;
-			SecondaryWeapon = config.SecondaryWeapon;
-			OnRoundStart = config.OnRoundStart;
-			OnRoundEnd = config.OnRoundEnd;
-			OnPlayerSpawn = config.OnPlayerSpawn;
-			DamageHitgroups = ["All"];
-			PlayerScale = 1.0f;
-			PlayerGravity = 1.0f;
-			PlayerSpeed = 1.0f;
-			CrosshairEnabled = true;
-			IsSpecialRound = true;
-			TriggerDiscipline = false;
-		}
-
-		public RoundTypeInfo ToInfo() => new()
-		{
-			Id = Id,
-			Name = Name,
-			TeamSize = TeamSize,
-			EnabledByDefault = EnabledByDefault,
-			PrimaryWeapon = PrimaryWeapon,
-			SecondaryWeapon = SecondaryWeapon,
-			IsSpecialRound = IsSpecialRound
-		};
+		PlayerScale = config.PlayerScale;
+		PlayerGravity = config.PlayerGravity;
+		PlayerSpeed = config.PlayerSpeed;
+		CrosshairEnabled = config.CrosshairEnabled;
+		TriggerDiscipline = config.TriggerDiscipline;
+		TriggerDisciplineDamage = config.TriggerDisciplineDamage;
 	}
 
-	/// <summary>Round type registry</summary>
-	public static class RoundTypes
+	/// <summary>From API config</summary>
+	public RoundType(SpecialRoundConfig config)
 	{
-		private static readonly List<RoundType> _types = [];
-		private static readonly Dictionary<int, RoundType> _byId = [];
-		private static readonly Dictionary<string, RoundType> _byName = [];
+		Id = _nextId++;
+		Name = config.Name;
+		TeamSize = config.TeamSize;
+		EnabledByDefault = config.EnabledByDefault;
+		Health = config.Health;
+		Armor = config.Armor;
+		Helmet = config.Helmet;
+		PrimaryWeapon = config.PrimaryWeapon;
+		SecondaryWeapon = config.SecondaryWeapon;
+		OnRoundStart = config.OnRoundStart;
+		OnRoundEnd = config.OnRoundEnd;
+		OnPlayerSpawn = config.OnPlayerSpawn;
+		DamageHitgroups = ["All"];
+		PlayerScale = 1.0f;
+		PlayerGravity = 1.0f;
+		PlayerSpeed = 1.0f;
+		CrosshairEnabled = true;
+		IsSpecialRound = true;
+		TriggerDiscipline = false;
+	}
 
-		public static IReadOnlyList<RoundType> All => _types;
+	public RoundTypeInfo ToInfo() => new()
+	{
+		Id = Id,
+		Name = Name,
+		TeamSize = TeamSize,
+		EnabledByDefault = EnabledByDefault,
+		PrimaryWeapon = PrimaryWeapon,
+		SecondaryWeapon = SecondaryWeapon,
+		IsSpecialRound = IsSpecialRound
+	};
+}
 
-		public static void LoadFromFiles()
-		{
-			Clear();
-			foreach (var config in RoundConfigLoader.LoadRoundConfigs())
-				Register(new RoundType(config));
+/// <summary>Round type registry</summary>
+public static class RoundTypes
+{
+	private static readonly List<RoundType> _types = [];
+	private static readonly Dictionary<int, RoundType> _byId = [];
+	private static readonly Dictionary<string, RoundType> _byName = [];
 
-			Core.Logger.LogInformation("Loaded {Count} round types.", All.Count);
-		}
+	public static IReadOnlyList<RoundType> All => _types;
 
-		public static int AddSpecialRound(SpecialRoundConfig config)
-		{
-			var rt = new RoundType(config);
-			Register(rt);
-			return rt.Id;
-		}
+	public static void LoadFromFiles()
+	{
+		Clear();
+		foreach (var config in RoundConfigLoader.LoadRoundConfigs())
+			Register(new RoundType(config));
 
-		public static bool RemoveSpecialRound(int id)
-		{
-			if (!_byId.TryGetValue(id, out var rt) || !rt.IsSpecialRound)
-				return false;
+		Core.Logger.LogInformation("Loaded {Count} round types.", All.Count);
+	}
 
-			_types.Remove(rt);
-			_byId.Remove(id);
-			_byName.Remove(rt.Name);
-			return true;
-		}
+	public static int AddSpecialRound(SpecialRoundConfig config)
+	{
+		var rt = new RoundType(config);
+		Register(rt);
+		return rt.Id;
+	}
 
-		public static void Clear()
-		{
-			_types.Clear();
-			_byId.Clear();
-			_byName.Clear();
-		}
+	public static bool RemoveSpecialRound(int id)
+	{
+		if (!_byId.TryGetValue(id, out var rt) || !rt.IsSpecialRound)
+			return false;
 
-		public static RoundType? GetById(int id) => _byId.GetValueOrDefault(id);
-		public static RoundType? GetByName(string name) => _byName.GetValueOrDefault(name);
+		_types.Remove(rt);
+		_byId.Remove(id);
+		_byName.Remove(rt.Name);
+		return true;
+	}
 
-		private static void Register(RoundType rt)
-		{
-			_types.Add(rt);
-			_byId[rt.Id] = rt;
-			_byName[rt.Name] = rt;
-		}
+	public static void Clear()
+	{
+		_types.Clear();
+		_byId.Clear();
+		_byName.Clear();
+	}
+
+	public static RoundType? GetById(int id) => _byId.GetValueOrDefault(id);
+	public static RoundType? GetByName(string name) => _byName.GetValueOrDefault(name);
+
+	private static void Register(RoundType rt)
+	{
+		_types.Add(rt);
+		_byId[rt.Id] = rt;
+		_byName[rt.Name] = rt;
 	}
 }

@@ -1,52 +1,47 @@
-using System.Collections.Concurrent;
-using K4ArenaSharedApi;
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
-namespace K4Arenas;
+namespace K4Arenas.Services;
 
-public sealed partial class Plugin
+public sealed class MapService
 {
-    public sealed class MapServices()
-    {
-        public void KillServerCommandEnts()
-        {
-            var pointServerCommands = Core.EntitySystem.GetAllEntitiesByDesignerName<CPointServerCommand>("point_servercommand");
-            foreach (var mapCmd in pointServerCommands)
-            {
-                if (mapCmd is { IsValid: true })
-                {
-                    mapCmd.AcceptInput("Kill", mapCmd, mapCmd);
-                }
-            }
-        }
+	public void KillServerCommandEnts()
+	{
+		var pointServerCommands = Core.EntitySystem.GetAllEntitiesByDesignerName<CPointServerCommand>("point_servercommand");
+		foreach (var mapCmd in pointServerCommands)
+		{
+			if (mapCmd is { IsValid: true })
+			{
+				mapCmd.AcceptInput("Kill", mapCmd, mapCmd);
+			}
+		}
+	}
 
-        public void ExecCustomConfig()
-        {
-            KillServerCommandEnts();
+	public void ExecCustomConfig()
+	{
+		KillServerCommandEnts();
 
-            var configDirectory = Path.Combine(
-                Core.PluginPath,
-                "..",
-                "..",
-                "..",
-                "cfg",
-                "swiftly_arenas"
-            );
+		var configDirectory = Path.Combine(
+			Core.PluginPath,
+			"..",
+			"..",
+			"..",
+			"cfg",
+			"swiftly_arenas"
+		);
 
-            var configPath = Path.Combine(
-                configDirectory,
-                "arena.cfg"
-            );
+		var configPath = Path.Combine(
+			configDirectory,
+			"arena.cfg"
+		);
 
-            try
-            {
-                Directory.CreateDirectory(configDirectory);
+		try
+		{
+			Directory.CreateDirectory(configDirectory);
 
-                if (!File.Exists(configPath))
-                {
-                    File.WriteAllText(configPath, """
+			if (!File.Exists(configPath))
+			{
+				File.WriteAllText(configPath, """
                 // k4-arenas custom config
 
                 bot_quota 3
@@ -81,27 +76,25 @@ public sealed partial class Plugin
                 sv_deadtalk 1
                 """);
 
-                    Core.Logger.LogInformation(
-                        "[k4-arenas] Created config: {Path}",
-                        configPath);
-                }
-            }
-            catch (Exception error)
-            {
-                Core.Logger.LogError(
-                    error,
-                    "[k4-arenas] Failed to create config");
+				Core.Logger.LogInformation(
+					"[k4-arenas] Created config: {Path}",
+					configPath);
+			}
+		}
+		catch (Exception error)
+		{
+			Core.Logger.LogError(
+				error,
+				"[k4-arenas] Failed to create config");
 
-                return;
-            }
+			return;
+		}
 
-            Core.Logger.LogInformation(
-                "[k4-arenas] Executing config: swiftly_arenas/arena.cfg");
+		Core.Logger.LogInformation(
+			"[k4-arenas] Executing config: swiftly_arenas/arena.cfg");
 
-            Core.Engine.ExecuteCommand(
-                "exec swiftly_arenas/arena.cfg"
-            );
-        }
-
-    }
+		Core.Engine.ExecuteCommand(
+			"exec swiftly_arenas/arena.cfg"
+		);
+	}
 }

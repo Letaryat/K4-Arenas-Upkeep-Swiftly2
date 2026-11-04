@@ -4,578 +4,538 @@ using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
-namespace K4Arenas;
+namespace K4Arenas.Models;
 
-public sealed partial class Plugin
+/// <summary>
+/// An arena where two teams duke it out. Holds spawn points and player refs,
+/// but actual player data lives in PlayerManager (single source of truth pattern)
+/// </summary>
+public class Arena
 {
-	/// <summary>
-	/// Spawn location with position and angle - simple struct for teleport data
-	/// </summary>
-	public readonly record struct SpawnLocation(Vector Position, QAngle Angle);
-	private readonly Vector defaultMins = new Vector(-16, -16, 0);
-	private readonly Vector defaultMaxs = new Vector(16, 16, 72);
+	private readonly PlayerManager _playerManager;
+	private readonly DuelService _duelService;
 
-	/// <summary>
-	/// An arena where two teams duke it out. Holds spawn points and player refs,
-	/// but actual player data lives in PlayerManager (single source of truth pattern)
-	/// </summary>
-	public class Arena
+	/// <summary>Arena ID (0-based, -1 for warmup)</summary>
+	public int Id { get; private set; } = -1;
+
+	/// <summary>Active duel reservation, if any</summary>
+	public int? DuelId { get; private set; }
+
+	/// <summary>True if this arena is reserved for a duel</summary>
+	public bool IsDuelArena => DuelId.HasValue;
+
+	/// <summary>Current arena score/rank</summary>
+	public int Score { get; private set; }
+
+	/// <summary>Active round type for this match</summary>
+	public RoundType? CurrentRoundType { get; private set; }
+	public int RoundGeneration { get; private set; }
+
+	/// <summary>Team 1 spawn points (T side)</summary>
+	public IReadOnlyList<SpawnLocation> Team1Spawns { get; }
+
+	/// <summary>Team 2 spawn points (CT side)</summary>
+	public IReadOnlyList<SpawnLocation> Team2Spawns { get; }
+
+	/// <summary>Team 1 player refs</summary>
+	public List<IPlayer> Team1SteamIds { get; private set; } = [];
+
+	/// <summary>Team 2 player refs</summary>
+	public List<IPlayer> Team2SteamIds { get; private set; } = [];
+
+	/// <summary>Result from the last round</summary>
+	public ArenaResult Result { get; private set; } = ArenaResult.Empty;
+
+	public Arena(PlayerManager playerManager, IReadOnlyList<SpawnLocation> team1Spawns, IReadOnlyList<SpawnLocation> team2Spawns, DuelService duelService)
 	{
-		private readonly PlayerManager _playerManager;
-		private readonly Plugin.DuelService _duelService;
-		/// <summary>Arena ID (0-based, -1 for warmup)</summary>
-		public int Id { get; private set; } = -1;
+		_playerManager = playerManager;
+		Team1Spawns = team1Spawns;
+		Team2Spawns = team2Spawns;
+		_duelService = duelService;
+	}
 
-		/// <summary>Active duel reservation, if any</summary>
-		public int? DuelId { get; private set; }
+	/// <summary>Team 1 ArenaPlayers resolved from PlayerManager</summary>
+	public IEnumerable<ArenaPlayer> Team1Players =>
+		Team1SteamIds.Select(_playerManager.GetPlayer).Where(p => p != null)!;
 
-		/// <summary>True if this arena is reserved for a duel</summary>
-		public bool IsDuelArena => DuelId.HasValue;
+	/// <summary>Team 2 ArenaPlayers resolved from PlayerManager</summary>
+	public IEnumerable<ArenaPlayer> Team2Players =>
+		Team2SteamIds.Select(_playerManager.GetPlayer).Where(p => p != null)!;
 
-		/// <summary>Current arena score/rank</summary>
-		public int Score { get; private set; }
+	/// <summary>All players in this arena</summary>
+	public IEnumerable<ArenaPlayer> AllPlayers => Team1Players.Concat(Team2Players);
 
-		/// <summary>Active round type for this match</summary>
-		public RoundType? CurrentRoundType { get; private set; }
-		public int RoundGeneration { get; private set; }
+	/// <summary>True if both teams have active (non-AFK) players</summary>
+	public bool IsActive =>
+		Team1Players.Any(p => p.IsValid && !p.IsAfk) &&
+		Team2Players.Any(p => p.IsValid && !p.IsAfk);
 
-		/// <summary>Team 1 spawn points (T side)</summary>
-		public IReadOnlyList<SpawnLocation> Team1Spawns { get; }
+	/// <summary>True if round is done (one team wiped or arena inactive)</summary>
+	public bool HasFinished =>
+		!IsActive ||
+		Team1Players.All(p => !p.IsValid || !p.IsAlive) ||
+		Team2Players.All(p => !p.IsValid || !p.IsAlive);
 
-		/// <summary>Team 2 spawn points (CT side)</summary>
-		public IReadOnlyList<SpawnLocation> Team2Spawns { get; }
+	/// <summary>True if at least one real player (not bot) is in the arena</summary>
+	public bool HasRealPlayers =>
+		Team1Players.Any(p => p.IsValid && !p.Player.IsFakeClient) ||
+		Team2Players.Any(p => p.IsValid && !p.Player.IsFakeClient);
 
-		/// <summary>Team 1 player refs</summary>
-		public List<IPlayer> Team1SteamIds { get; private set; } = [];
+	/// <summary>True if no players at all</summary>
+	public bool IsEmpty => Team1SteamIds.Count == 0 && Team2SteamIds.Count == 0;
 
-		/// <summary>Team 2 player refs</summary>
-		public List<IPlayer> Team2SteamIds { get; private set; } = [];
+	/// <summary>True if the arena is empty and not reserved for a duel</summary>
+	public bool IsFreeForDuel => IsEmpty && !IsDuelArena;
 
-		/// <summary>Result from the last round</summary>
-		public ArenaResult Result { get; private set; } = ArenaResult.Empty;
+	/// <summary>Reserves the arena for a duel</summary>
+	public void ReserveForDuel(int duelId)
+	{
+		if (IsDuelArena)
+			return;
 
-		public Arena(PlayerManager playerManager, IReadOnlyList<SpawnLocation> team1Spawns, IReadOnlyList<SpawnLocation> team2Spawns, Plugin.DuelService duelService)
+		DuelId = duelId;
+	}
+
+	/// <summary>Releases the duel reservation</summary>
+	public void ReleaseDuel()
+	{
+		DuelId = null;
+	}
+
+	/// <summary>
+	/// Sets up a regular match with two teams
+	/// </summary>
+	public void SetupMatch(List<ArenaPlayer> team1, List<ArenaPlayer>? team2, RoundType roundType, int arenaId, int score = 0)
+	{
+		Id = arenaId;
+		Score = score;
+		CurrentRoundType = roundType;
+		Result = ArenaResult.Empty;
+
+		RoundGeneration++;
+
+		Team1SteamIds = team1.Select(p => p.Player).ToList();
+		Team2SteamIds = team2?.Select(p => p.Player).ToList() ?? [];
+
+		var (t1Spawns, t2Spawns) = Random.Shared.Next(2) == 0
+			? (Team1Spawns, Team2Spawns)
+			: (Team2Spawns, Team1Spawns);
+
+		AssignTeamDetails(team1, t1Spawns, Team.T, 1);
+		if (team2 != null)
+			AssignTeamDetails(team2, t2Spawns, Team.CT, 2);
+	}
+
+	/// <summary>
+	/// Sets up warmup mode (can be solo or with opponent)
+	/// </summary>
+	public void SetupWarmup(ArenaPlayer player1, ArenaPlayer? player2)
+	{
+		Id = -1;
+		Score = 0;
+		CurrentRoundType = null;
+		Result = ArenaResult.Empty;
+
+		RoundGeneration++;
+
+		Team1SteamIds = [player1.Player];
+		Team2SteamIds = player2 != null ? [player2.Player] : [];
+
+		var (t1Spawns, t2Spawns) = Random.Shared.Next(2) == 0
+			? (Team1Spawns, Team2Spawns)
+			: (Team2Spawns, Team1Spawns);
+
+		AssignTeamDetails([player1], t1Spawns, Team.T, 1);
+		if (player2 != null)
+			AssignTeamDetails([player2], t2Spawns, Team.CT, 2);
+	}
+
+	/// <summary>
+	/// Adds an opponent to a warmup arena that only has one player
+	/// </summary>
+	public void AddWarmupOpponent(ArenaPlayer player2)
+	{
+		if (Team2SteamIds.Count > 0)
+			return;
+
+		Team2SteamIds = [player2.Player];
+
+		var team1Player = Team1Players.FirstOrDefault();
+		var team1UsesSpawn1 = team1Player?.SpawnLocation is { } loc &&
+			Team1Spawns.Any(s => s.Position == loc.Position);
+
+		var spawns = team1UsesSpawn1 ? Team2Spawns : Team1Spawns;
+		AssignTeamDetails([player2], spawns, Team.CT, 2);
+	}
+
+	/// <summary>
+	/// Removes a player from the arena
+	/// </summary>
+	public bool RemovePlayer(IPlayer player)
+	{
+		var removed = Team1SteamIds.Remove(player) || Team2SteamIds.Remove(player);
+
+		if (removed)
 		{
-			_playerManager = playerManager;
-			Team1Spawns = team1Spawns;
-			Team2Spawns = team2Spawns;
-			_duelService = duelService;
+			var arenaPlayer = _playerManager.GetPlayer(player);
+			arenaPlayer?.ClearArenaState();
 		}
 
-		/// <summary>Team 1 ArenaPlayers resolved from PlayerManager</summary>
-		public IEnumerable<ArenaPlayer> Team1Players =>
-			Team1SteamIds.Select(_playerManager.GetPlayer).Where(p => p != null)!;
+		return removed;
+	}
 
-		/// <summary>Team 2 ArenaPlayers resolved from PlayerManager</summary>
-		public IEnumerable<ArenaPlayer> Team2Players =>
-			Team2SteamIds.Select(_playerManager.GetPlayer).Where(p => p != null)!;
+	/// <summary>
+	/// Gets which team a player is on (1 or 2, 0 if not found)
+	/// </summary>
+	public int GetPlayerTeam(IPlayer player)
+	{
+		if (Team1SteamIds.Contains(player)) return 1;
+		if (Team2SteamIds.Contains(player)) return 2;
+		return 0;
+	}
 
-		/// <summary>All players in this arena</summary>
-		public IEnumerable<ArenaPlayer> AllPlayers => Team1Players.Concat(Team2Players);
-
-		/// <summary>True if both teams have active (non-AFK) players</summary>
-		public bool IsActive =>
-			Team1Players.Any(p => p.IsValid && !p.IsAfk) &&
-			Team2Players.Any(p => p.IsValid && !p.IsAfk);
-
-		/// <summary>True if round is done (one team wiped or arena inactive)</summary>
-		public bool HasFinished =>
-			!IsActive ||
-			Team1Players.All(p => !p.IsValid || !p.IsAlive) ||
-			Team2Players.All(p => !p.IsValid || !p.IsAlive);
-
-		/// <summary>True if at least one real player (not bot) is in the arena</summary>
-		public bool HasRealPlayers =>
-			Team1Players.Any(p => p.IsValid && !p.Player.IsFakeClient) ||
-			Team2Players.Any(p => p.IsValid && !p.Player.IsFakeClient);
-
-		/// <summary>True if no players at all</summary>
-		public bool IsEmpty => Team1SteamIds.Count == 0 && Team2SteamIds.Count == 0;
-
-		/// <summary>True if the arena is empty and not reserved for a duel</summary>
-		public bool IsFreeForDuel => IsEmpty && !IsDuelArena;
-
-		/// <summary>Reserves the arena for a duel</summary>
-		public void ReserveForDuel(int duelId)
+	/// <summary>
+	/// Gets the opponents for a player
+	/// </summary>
+	public IEnumerable<ArenaPlayer> GetOpponents(IPlayer player)
+	{
+		return GetPlayerTeam(player) switch
 		{
-			if (IsDuelArena)
-				return;
-
-			DuelId = duelId;
-		}
-
-		/// <summary>Releases the duel reservation</summary>
-		public void ReleaseDuel()
-		{
-			DuelId = null;
-		}
-
-		/// <summary>
-		/// Sets up a regular match with two teams
-		/// </summary>
-		public void SetupMatch(List<ArenaPlayer> team1, List<ArenaPlayer>? team2, RoundType roundType, int arenaId, int score = 0)
-		{
-			Id = arenaId;
-			Score = score;
-			CurrentRoundType = roundType;
-			Result = ArenaResult.Empty;
-
-			RoundGeneration++;
-
-			Team1SteamIds = team1.Select(p => p.Player).ToList();
-			Team2SteamIds = team2?.Select(p => p.Player).ToList() ?? [];
-
-			// randomize spawn sides for variety
-			var (t1Spawns, t2Spawns) = Random.Shared.Next(2) == 0
-				? (Team1Spawns, Team2Spawns)
-				: (Team2Spawns, Team1Spawns);
-
-			AssignTeamDetails(team1, t1Spawns, Team.T, 1);
-			if (team2 != null)
-				AssignTeamDetails(team2, t2Spawns, Team.CT, 2);
-		}
-
-		/// <summary>
-		/// Sets up warmup mode (can be solo or with opponent)
-		/// </summary>
-		public void SetupWarmup(ArenaPlayer player1, ArenaPlayer? player2)
-		{
-			Id = -1;
-			Score = 0;
-			CurrentRoundType = null;
-			Result = ArenaResult.Empty;
-
-			RoundGeneration++;
-
-			Team1SteamIds = [player1.Player];
-			Team2SteamIds = player2 != null ? [player2.Player] : [];
-
-			var (t1Spawns, t2Spawns) = Random.Shared.Next(2) == 0
-				? (Team1Spawns, Team2Spawns)
-				: (Team2Spawns, Team1Spawns);
-
-			AssignTeamDetails([player1], t1Spawns, Team.T, 1);
-			if (player2 != null)
-				AssignTeamDetails([player2], t2Spawns, Team.CT, 2);
-		}
-
-		/// <summary>
-		/// Adds an opponent to a warmup arena that only has one player
-		/// </summary>
-		public void AddWarmupOpponent(ArenaPlayer player2)
-		{
-			if (Team2SteamIds.Count > 0)
-				return;
-
-			Team2SteamIds = [player2.Player];
-
-			// figure out which spawn set team1 is using, give the other to team2
-			var team1Player = Team1Players.FirstOrDefault();
-			var team1UsesSpawn1 = team1Player?.SpawnLocation is { } loc &&
-				Team1Spawns.Any(s => s.Position == loc.Position);
-
-			var spawns = team1UsesSpawn1 ? Team2Spawns : Team1Spawns;
-			AssignTeamDetails([player2], spawns, Team.CT, 2);
-		}
-
-		/// <summary>
-		/// Removes a player from the arena
-		/// </summary>
-		public bool RemovePlayer(IPlayer player)
-		{
-			var removed = Team1SteamIds.Remove(player) || Team2SteamIds.Remove(player);
-
-			if (removed)
-			{
-				var arenaPlayer = _playerManager.GetPlayer(player);
-				arenaPlayer?.ClearArenaState();
-			}
-
-			return removed;
-		}
-
-		/// <summary>
-		/// Gets which team a player is on (1 or 2, 0 if not found)
-		/// </summary>
-		public int GetPlayerTeam(IPlayer player)
-		{
-			if (Team1SteamIds.Contains(player)) return 1;
-			if (Team2SteamIds.Contains(player)) return 2;
-			return 0;
-		}
-
-		/// <summary>
-		/// Gets the opponents for a player
-		/// </summary>
-		public IEnumerable<ArenaPlayer> GetOpponents(IPlayer player)
-		{
-			return GetPlayerTeam(player) switch
-			{
-				1 => Team2Players,
-				2 => Team1Players,
-				_ => []
-			};
-		}
-
-		/// <summary>
-		/// Sets up a player that just spawned - teleport, weapons, UI, etc.
-		/// </summary>
-		public void SetupPlayer(ArenaPlayer player)
-		{
-			if (!player.IsValid || player.SpawnLocation is null)
-				return;
-
-			player.TeleportToSpawn();
-			player.ApplyScoreboardOrder();
-
-			var roundType = CurrentRoundType ?? RoundType.Warmup;
-			var playerId = player.PlayerId;
-			var playerName = player.Player.Controller.PlayerName;
-
-			player.SetupWeapons(roundType);
-
-			CrosshairModifier(player, roundType.CrosshairEnabled);
-			GravityModifier(player, roundType.PlayerGravity);
-			SpeedModifier(player, roundType.PlayerSpeed);
-
-			if (roundType.PlayerScale > 1.0)
-				PlayerScaleModifierBig(player, roundType.PlayerScale);
-			else
-				ChangePlayerScale(player, roundType.PlayerScale);
-
-			if (roundType.IsSpecialRound)
-				roundType.OnPlayerSpawn?.Invoke(player.Player);
-		}
-
-
-		/// <summary>
-		/// Shows arena info message to a player (called once on initial assignment, not on respawns)
-		/// </summary>
-		public void SendArenaMessage(ArenaPlayer player)
-		{
-			if (!player.IsValid || player.Player.IsFakeClient)
-				return;
-
-			if (!player.IsValid)
-				return;
-
-			if (player.CurrentArena == null) return;
-
-			var localizer = Core.Translation.GetPlayerLocalizer(player.Player);
-			var opponents = GetOpponents(player.Player).Select(p => p.Player.Controller.PlayerName).ToList();
-			var opponentNames = opponents.Count > 0
-				? string.Join(", ", opponents)
-				: localizer["k4.general.no_opponent"];
-			var arenaName = GetDisplayName();
-			var roundName = Id == -1
-				? localizer["k4.general.random"]
-				: localizer[CurrentRoundType?.Name ?? "k4.general.random"];
-
-			var freezeTimeMs = 6000;
-			if (!player.CurrentArena.IsDuelArena)
-			{
-				player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstart", arenaName, opponentNames, roundName]}");
-			}
-			else
-			{
-				var duel = _duelService.GetActiveDuel(player.Player);
-
-				if (duel != null)
-				{
-					var isChallenger = player.PlayerId == duel.Challenger.PlayerID;
-					var playerScore = isChallenger ? duel.ChallengerScore : duel.OpponentScore;
-					var opponentScore = isChallenger ? duel.OpponentScore : duel.ChallengerScore;
-					arenaName = localizer["k4.rounds.challenge"];
-					if (!duel.StartMessageSent && (opponentScore == 0 && playerScore == 0))
-					{
-						player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
-						duel.StartMessageSent = true;
-					}
-					else if (opponentScore > 0 || playerScore > 0)
-					{
-						player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
-
-					}
-
-				}
-
-			}
-
-			player.Player.SendCenterHTML(localizer["k4.chat.arena_roundstart_html", arenaName, opponentNames, roundName], freezeTimeMs);
-		}
-
-		/// <summary>Display name (server language)</summary>
-		public string GetDisplayName() => Id == -1
-			? Core.Localizer["k4.general.warmup"]
-			: $"{Id + 1}";
-
-		/// <summary>Clan tag for scoreboard</summary>
-		public string GetClanTag() => Id == -1
-			? $"{Core.Localizer["k4.general.warmup"]}"
-			: $"{Core.Localizer["k4.general.arena"]} {Id + 1}";
-
-
-
-
-		/// <summary>Converts to API DTO</summary>
-		public ArenaInfo ToInfo() => new()
-		{
-			Id = Id,
-			DisplayName = GetDisplayName(),
-			Score = Score,
-			CurrentRoundTypeName = CurrentRoundType?.Name,
-			Team1Count = Team1SteamIds.Count,
-			Team2Count = Team2SteamIds.Count,
-			IsActive = IsActive
+			1 => Team2Players,
+			2 => Team1Players,
+			_ => []
 		};
+	}
 
-		/// <summary>
-		/// Figures out who won the round and sets the Result
-		/// </summary>
-		public ArenaResult DetermineResult()
+	/// <summary>
+	/// Sets up a player that just spawned - teleport, weapons, UI, etc.
+	/// </summary>
+	public void SetupPlayer(ArenaPlayer player)
+	{
+		if (!player.IsValid || player.SpawnLocation is null)
+			return;
+
+		player.TeleportToSpawn();
+		player.ApplyScoreboardOrder();
+
+		var roundType = CurrentRoundType ?? RoundType.Warmup;
+
+		player.SetupWeapons(roundType);
+
+		CrosshairModifier(player, roundType.CrosshairEnabled);
+		GravityModifier(player, roundType.PlayerGravity);
+		SpeedModifier(player, roundType.PlayerSpeed);
+
+		if (roundType.PlayerScale > 1.0)
+			PlayerScaleModifierBig(player, roundType.PlayerScale);
+		else
+			ChangePlayerScale(player, roundType.PlayerScale);
+
+		if (roundType.IsSpecialRound)
+			roundType.OnPlayerSpawn?.Invoke(player.Player);
+	}
+
+	/// <summary>
+	/// Shows arena info message to a player (called once on initial assignment, not on respawns)
+	/// </summary>
+	public void SendArenaMessage(ArenaPlayer player)
+	{
+		if (!player.IsValid || player.Player.IsFakeClient)
+			return;
+
+		if (player.CurrentArena == null) return;
+
+		var localizer = Core.Translation.GetPlayerLocalizer(player.Player);
+		var opponents = GetOpponents(player.Player).Select(p => p.Player.Controller.PlayerName).ToList();
+		var opponentNames = opponents.Count > 0
+			? string.Join(", ", opponents)
+			: localizer["k4.general.no_opponent"];
+		var arenaName = GetDisplayName();
+		var roundName = Id == -1
+			? localizer["k4.general.random"]
+			: localizer[CurrentRoundType?.Name ?? "k4.general.random"];
+
+		var freezeTimeMs = 6000;
+		if (!player.CurrentArena.IsDuelArena)
 		{
-			var team1 = Team1Players.ToList();
-			var team2 = Team2Players.ToList();
+			player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstart", arenaName, opponentNames, roundName]}");
+		}
+		else
+		{
+			var duel = _duelService.GetActiveDuel(player.Player);
 
-			// warmup = always tie
-			if (Id == -1)
+			if (duel != null)
 			{
-				Result = team1.Count > 0 && team2.Count > 0
-					? ArenaResult.Tie(team1, team2)
-					: ArenaResult.Empty;
-				return Result;
-			}
-
-			if (team1.Count == 0 && team2.Count == 0)
-			{
-				Result = ArenaResult.Empty;
-				return Result;
-			}
-
-			if (team1.Count == 0 || team2.Count == 0)
-			{
-				var winners = team1.Count > 0 ? team1 : team2;
-				Result = ArenaResult.NoOpponent(winners);
-				return Result;
-			}
-
-			var team1Alive = team1.Count(p => p.IsValid && p.IsAlive);
-			var team2Alive = team2.Count(p => p.IsValid && p.IsAlive);
-
-			if (team1Alive == team2Alive)
-			{
-				Result = ArenaResult.Tie(team1, team2);
-			}
-			else
-			{
-				var winners = team1Alive > team2Alive ? team1 : team2;
-				var losers = team1Alive > team2Alive ? team2 : team1;
-
-				foreach (var winner in winners)
+				var isChallenger = player.PlayerId == duel.Challenger.PlayerID;
+				var playerScore = isChallenger ? duel.ChallengerScore : duel.OpponentScore;
+				var opponentScore = isChallenger ? duel.OpponentScore : duel.ChallengerScore;
+				arenaName = localizer["k4.rounds.challenge"];
+				if (!duel.StartMessageSent && (opponentScore == 0 && playerScore == 0))
 				{
-					winner.MvpCount++;
+					player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
+					duel.StartMessageSent = true;
 				}
-
-				Result = ArenaResult.Win(winners, losers);
+				else if (opponentScore > 0 || playerScore > 0)
+				{
+					player.Player.SendChat($"{localizer["k4.general.prefix"]} {localizer["k4.chat.arena_roundstartchallange", arenaName, opponentNames, roundName, duel.TotalRounds, playerScore, opponentScore]}");
+				}
 			}
+		}
 
+		player.Player.SendCenterHTML(localizer["k4.chat.arena_roundstart_html", arenaName, opponentNames, roundName], freezeTimeMs);
+	}
+
+	/// <summary>Display name (server language)</summary>
+	public string GetDisplayName() => Id == -1
+		? Core.Localizer["k4.general.warmup"]
+		: $"{Id + 1}";
+
+	/// <summary>Clan tag for scoreboard</summary>
+	public string GetClanTag() => Id == -1
+		? $"{Core.Localizer["k4.general.warmup"]}"
+		: $"{Core.Localizer["k4.general.arena"]} {Id + 1}";
+
+	/// <summary>Converts to API DTO</summary>
+	public ArenaInfo ToInfo() => new()
+	{
+		Id = Id,
+		DisplayName = GetDisplayName(),
+		Score = Score,
+		CurrentRoundTypeName = CurrentRoundType?.Name,
+		Team1Count = Team1SteamIds.Count,
+		Team2Count = Team2SteamIds.Count,
+		IsActive = IsActive
+	};
+
+	/// <summary>
+	/// Figures out who won the round and sets the Result
+	/// </summary>
+	public ArenaResult DetermineResult()
+	{
+		var team1 = Team1Players.ToList();
+		var team2 = Team2Players.ToList();
+
+		if (Id == -1)
+		{
+			Result = team1.Count > 0 && team2.Count > 0
+				? ArenaResult.Tie(team1, team2)
+				: ArenaResult.Empty;
 			return Result;
 		}
 
-		/// <summary>
-		/// Resets the arena for next round
-		/// </summary>
-		public void Clear()
+		if (team1.Count == 0 && team2.Count == 0)
 		{
-			foreach (var player in AllPlayers)
-			{
-				player.ClearArenaState();
-				ResetRoundModifiers(player);
-			}
-
-			Team1SteamIds = [];
-			Team2SteamIds = [];
-			CurrentRoundType = null;
 			Result = ArenaResult.Empty;
-			Id = -1;
-			Score = 0;
-			RoundGeneration++;
+			return Result;
 		}
 
-		private void AssignTeamDetails(IReadOnlyList<ArenaPlayer> team, IReadOnlyList<SpawnLocation> spawns, Team switchTo, int teamNumber)
+		if (team1.Count == 0 || team2.Count == 0)
 		{
-			if (team.Count == 0 || spawns.Count == 0)
-				return;
+			var winners = team1.Count > 0 ? team1 : team2;
+			Result = ArenaResult.NoOpponent(winners);
+			return Result;
+		}
 
-			var availableSpawns = spawns.ToList();
+		var team1Alive = team1.Count(p => p.IsValid && p.IsAlive);
+		var team2Alive = team2.Count(p => p.IsValid && p.IsAlive);
 
-			foreach (var player in team)
+		if (team1Alive == team2Alive)
+		{
+			Result = ArenaResult.Tie(team1, team2);
+		}
+		else
+		{
+			var winners = team1Alive > team2Alive ? team1 : team2;
+			var losers = team1Alive > team2Alive ? team2 : team1;
+
+			foreach (var winner in winners)
 			{
-				if (!player.IsValid || availableSpawns.Count == 0)
-					continue;
-
-				var spawnIndex = Random.Shared.Next(availableSpawns.Count);
-				var spawn = availableSpawns[spawnIndex];
-				availableSpawns.RemoveAt(spawnIndex);
-
-				player.SetInArena(this, teamNumber, spawn);
-
-				player.PlayerIsSafe = true;
-				if (player.Player.Controller?.Team > Team.Spectator)
-					player.Player.SwitchTeam(switchTo);
-				else
-					player.Player.ChangeTeam(switchTo);
-				player.PlayerIsSafe = false;
-			}
-		}
-
-		// Round modifers:
-		private void CrosshairModifier(ArenaPlayer player, bool isEnabled)
-		{
-			if (!player.IsValid)
-				return;
-
-			var pawn = player.Player.PlayerPawn;
-			if (pawn == null)
-				return;
-
-			if (!isEnabled)
-				pawn.HideHUD = 1 << 8;
-			else
-				pawn.HideHUD = 0;
-
-			pawn.HideHUDUpdated();
-		}
-
-		// I have fucking no idea how to do it with one method so I make 2 one from small models one for big ones.
-		// In either method if one worked, the other one had hitboxes fucked up.
-		private void PlayerScaleModifierBig(ArenaPlayer player, float scale)
-		{
-			if (!player.IsValid)
-				return;
-
-			var pawn = player.Player.PlayerPawn;
-
-			if (pawn == null || !pawn.IsValid)
-			{
-				return;
+				winner.MvpCount++;
 			}
 
-			var collision = pawn.Collision;
-
-			if (collision == null)
-			{
-				return;
-			}
-
-			var origMins = pawn.Collision.Mins;
-			var origMaxs = pawn.Collision.Maxs;
-			var origRadius = pawn.Collision.BoundingRadius;
-
-			pawn.SetScale(scale);
-
-			pawn.Collision.Mins = origMins * scale;
-			pawn.Collision.Maxs = origMaxs * scale;
-			pawn.Collision.BoundingRadius = origRadius * scale;
-
-			Core.Scheduler.NextTick(() =>
-			{
-
-				collision.MinsUpdated();
-				collision.MaxsUpdated();
-
-				pawn.CollisionRulesChanged();
-				pawn.CollisionUpdated();
-				pawn.CBodyComponentUpdated();
-			});
-
-			var model = pawn.GetModel();
-			if (model == null) return;
-			pawn.SetModel(model);
-
+			Result = ArenaResult.Win(winners, losers);
 		}
 
-		private void ChangePlayerScale(ArenaPlayer player, float scale)
+		return Result;
+	}
+
+	/// <summary>
+	/// Resets the arena for next round
+	/// </summary>
+	public void Clear()
+	{
+		foreach (var player in AllPlayers)
 		{
-			if (!player.IsValid || scale <= 0f)
-				return;
-
-			var pawn = player.Player.PlayerPawn;
-
-			if (pawn == null || !pawn.IsValid)
-				return;
-
-			var cbody = pawn.CBodyComponent;
-			if (cbody == null)
-				return;
-
-			var sceneNode = cbody.SceneNode;
-			if (sceneNode == null)
-				return;
-
-			var skeleton = sceneNode.GetSkeletonInstance();
-			if (skeleton == null)
-				return;
-
-			// Odpowiednik ustawienia skali SkeletonInstance.
-			skeleton.Scale = scale;
-
-			// Odpowiednik inputu SetScale.
-			pawn.SetScale(scale);
-
-			Core.Scheduler.NextTick(() =>
-			{
-				if (!player.IsValid || !pawn.IsValid)
-					return;
-
-				pawn.CBodyComponentUpdated();
-				sceneNode.ScaleUpdated();
-				skeleton.ScaleUpdated();
-			});
+			player.ClearArenaState();
+			ResetRoundModifiers(player);
 		}
 
-		private void GravityModifier(ArenaPlayer player, float _scale)
-		{
-			if (!player.IsValid)
-				return;
+		Team1SteamIds = [];
+		Team2SteamIds = [];
+		CurrentRoundType = null;
+		Result = ArenaResult.Empty;
+		Id = -1;
+		Score = 0;
+		RoundGeneration++;
+	}
 
-			var pawn = player.Player.PlayerPawn;
-			if (pawn == null)
-				return;
-
-			pawn.ActualGravityScale = _scale;
+	private void AssignTeamDetails(IReadOnlyList<ArenaPlayer> team, IReadOnlyList<SpawnLocation> spawns, Team switchTo, int teamNumber)
+	{
+		if (team.Count == 0 || spawns.Count == 0)
 			return;
-		}
-		public void SpeedModifier(ArenaPlayer player, float scale)
+
+		var availableSpawns = spawns.ToList();
+
+		foreach (var player in team)
 		{
-			if (!player.IsValid)
-				return;
+			if (!player.IsValid || availableSpawns.Count == 0)
+				continue;
 
-			var pawn = player.Player.PlayerPawn;
-			if (pawn == null)
-				return;
+			var spawnIndex = Random.Shared.Next(availableSpawns.Count);
+			var spawn = availableSpawns[spawnIndex];
+			availableSpawns.RemoveAt(spawnIndex);
 
-			pawn.VelocityModifier = scale;
-			pawn.VelocityModifierUpdated();
+			player.SetInArena(this, teamNumber, spawn);
+
+			player.PlayerIsSafe = true;
+			if (player.Player.Controller?.Team > Team.Spectator)
+				player.Player.SwitchTeam(switchTo);
+			else
+				player.Player.ChangeTeam(switchTo);
+			player.PlayerIsSafe = false;
 		}
+	}
 
-		private void ResetRoundModifiers(ArenaPlayer player)
+	private void CrosshairModifier(ArenaPlayer player, bool isEnabled)
+	{
+		if (!player.IsValid)
+			return;
+
+		var pawn = player.Player.PlayerPawn;
+		if (pawn == null)
+			return;
+
+		if (!isEnabled)
+			pawn.HideHUD = 1 << 8;
+		else
+			pawn.HideHUD = 0;
+
+		pawn.HideHUDUpdated();
+	}
+
+	private void PlayerScaleModifierBig(ArenaPlayer player, float scale)
+	{
+		if (!player.IsValid)
+			return;
+
+		var pawn = player.Player.PlayerPawn;
+
+		if (pawn == null || !pawn.IsValid)
+			return;
+
+		var collision = pawn.Collision;
+
+		if (collision == null)
+			return;
+
+		var origMins = pawn.Collision.Mins;
+		var origMaxs = pawn.Collision.Maxs;
+		var origRadius = pawn.Collision.BoundingRadius;
+
+		pawn.SetScale(scale);
+
+		pawn.Collision.Mins = origMins * scale;
+		pawn.Collision.Maxs = origMaxs * scale;
+		pawn.Collision.BoundingRadius = origRadius * scale;
+
+		Core.Scheduler.NextTick(() =>
 		{
-			if (!player.IsValid)
+			collision.MinsUpdated();
+			collision.MaxsUpdated();
+
+			pawn.CollisionRulesChanged();
+			pawn.CollisionUpdated();
+			pawn.CBodyComponentUpdated();
+		});
+
+		var model = pawn.GetModel();
+		if (model == null) return;
+		pawn.SetModel(model);
+	}
+
+	private void ChangePlayerScale(ArenaPlayer player, float scale)
+	{
+		if (!player.IsValid || scale <= 0f)
+			return;
+
+		var pawn = player.Player.PlayerPawn;
+
+		if (pawn == null || !pawn.IsValid)
+			return;
+
+		var cbody = pawn.CBodyComponent;
+		if (cbody == null)
+			return;
+
+		var sceneNode = cbody.SceneNode;
+		if (sceneNode == null)
+			return;
+
+		var skeleton = sceneNode.GetSkeletonInstance();
+		if (skeleton == null)
+			return;
+
+		skeleton.Scale = scale;
+		pawn.SetScale(scale);
+
+		Core.Scheduler.NextTick(() =>
+		{
+			if (!player.IsValid || !pawn.IsValid)
 				return;
 
-			var pawn = player.Player.PlayerPawn;
-			if (pawn == null)
-				return;
+			pawn.CBodyComponentUpdated();
+			sceneNode.ScaleUpdated();
+			skeleton.ScaleUpdated();
+		});
+	}
 
-			CrosshairModifier(player, true);
+	private void GravityModifier(ArenaPlayer player, float scale)
+	{
+		if (!player.IsValid)
+			return;
 
-			ChangePlayerScale(player, 1.0f);
+		var pawn = player.Player.PlayerPawn;
+		if (pawn == null)
+			return;
 
-			GravityModifier(player, 1.0f);
+		pawn.ActualGravityScale = scale;
+	}
 
-			SpeedModifier(player, 1.0f);
-		}
+	public void SpeedModifier(ArenaPlayer player, float scale)
+	{
+		if (!player.IsValid)
+			return;
 
+		var pawn = player.Player.PlayerPawn;
+		if (pawn == null)
+			return;
+
+		pawn.VelocityModifier = scale;
+		pawn.VelocityModifierUpdated();
+	}
+
+	private void ResetRoundModifiers(ArenaPlayer player)
+	{
+		if (!player.IsValid)
+			return;
+
+		var pawn = player.Player.PlayerPawn;
+		if (pawn == null)
+			return;
+
+		CrosshairModifier(player, true);
+		ChangePlayerScale(player, 1.0f);
+		GravityModifier(player, 1.0f);
+		SpeedModifier(player, 1.0f);
 	}
 }
