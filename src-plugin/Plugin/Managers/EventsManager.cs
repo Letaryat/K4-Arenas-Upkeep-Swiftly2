@@ -25,6 +25,7 @@ public sealed class EventsManager
 
 	private CancellationTokenSource? _warmupTimerCts;
 	private CancellationTokenSource? _clantagTimerCts;
+	private bool _winPanelMatchActive = false;
 	private bool _mapActive;
 
 	public Guid? JointeamHookGuid { get; private set; }
@@ -70,6 +71,7 @@ public sealed class EventsManager
 		_core.GameEvent.HookPre<EventWeaponFire>(OnWeaponFire);
 
 		_core.GameEvent.HookPre<EventRoundMvp>(OnRoundMvp);
+		_core.GameEvent.HookPre<EventCsWinPanelMatch>(OnCsWinPanelMatch);
 
 		if (Config.CurrentValue.Compatibility.BlockFlashOfNotOpponent)
 		{
@@ -81,7 +83,13 @@ public sealed class EventsManager
 		_core.GameHooks.Pawn.PostThink.Pre += OnPlayerPawnPostThink;
 	}
 
-	public void UnregisterEvents()
+    private HookResult OnCsWinPanelMatch(EventCsWinPanelMatch eventObj)
+    {
+		_winPanelMatchActive = true;
+        return HookResult.Continue;
+    }
+
+    public void UnregisterEvents()
 	{
 		if (JointeamHookGuid.HasValue)
 		{
@@ -219,6 +227,7 @@ public sealed class EventsManager
 	private void OnMapLoad(IOnMapLoadEvent @event)
 	{
 		_mapActive = true;
+		_winPanelMatchActive = false;
 
 		Task.Run(() => _databaseService.PurgeOldRecordsAsync());
 
@@ -296,11 +305,14 @@ public sealed class EventsManager
 		_playerManager.Clear();
 		_arenaManager.Shutdown();
 
+		_winPanelMatchActive = false;
+
 		_triggerDiscipline.ClearAllTriggerShots();
 	}
 
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
+		if(_winPanelMatchActive) return HookResult.Continue;
 		var userId = @event.UserId;
 		_core.Scheduler.NextWorldUpdate(() => SetupActivatedPlayer(userId, 0));
 		return HookResult.Continue;
