@@ -1,9 +1,13 @@
 using K4ArenaSharedApi;
 using Microsoft.Extensions.Logging;
+using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameHooks;
+using SwiftlyS2.Shared.Menu.Components;
+using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.ProtobufDefinitions;
@@ -81,15 +85,18 @@ public sealed class EventsManager
 		JointeamHookGuid = _core.Command.HookClientCommand(OnJoinTeamCommand);
 		_core.GameHooks.Entities.TakeDamage.Pre += HookOnTakeDamage;
 		_core.GameHooks.Pawn.PostThink.Pre += OnPlayerPawnPostThink;
+
+
+
 	}
 
-    private HookResult OnCsWinPanelMatch(EventCsWinPanelMatch eventObj)
-    {
+	private HookResult OnCsWinPanelMatch(EventCsWinPanelMatch eventObj)
+	{
 		_winPanelMatchActive = true;
-        return HookResult.Continue;
-    }
+		return HookResult.Continue;
+	}
 
-    public void UnregisterEvents()
+	public void UnregisterEvents()
 	{
 		if (JointeamHookGuid.HasValue)
 		{
@@ -312,7 +319,7 @@ public sealed class EventsManager
 
 	private HookResult OnPlayerActivate(EventPlayerActivate @event)
 	{
-		if(_winPanelMatchActive) return HookResult.Continue;
+		if (_winPanelMatchActive) return HookResult.Continue;
 		var userId = @event.UserId;
 		_core.Scheduler.NextWorldUpdate(() => SetupActivatedPlayer(userId, 0));
 		return HookResult.Continue;
@@ -695,4 +702,7 @@ public sealed class EventsManager
 
 		return HookResult.Continue;
 	}
+
+
+
 }
