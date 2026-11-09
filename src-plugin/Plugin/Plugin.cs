@@ -8,7 +8,7 @@ using SwiftlyS2.Shared.Plugins;
 
 namespace K4Arenas;
 
-[PluginMetadata(Id = "k4.arenas", Version = "1.2.4", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
+[PluginMetadata(Id = "k4.arenas", Version = "1.2.6", Name = "K4 - Arenas (PoorVersion)", Author = "K4ryuu", Description = "Ladder type arena gamemode for Counter-Strike: 2 using SwiftlyS2 framework.")]
 public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
 	private const string ConfigFileName = "config.json";
@@ -31,6 +31,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 	private TriggerDisciplineService _triggerDisciplineService = null!;
 	private CommandsManager _commandsManager = null!;
 	private EventsManager _eventsManager = null!;
+	private MenuServices _menuServices = null!;
 
 	public override void Load(bool hotReload)
 	{
@@ -103,7 +104,7 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 		_arenaManager = new ArenaManager(_playerManager);
 		_databaseService = new DatabaseService(Config.CurrentValue.DatabaseConnection, Config.CurrentValue.DatabasePurgeDays);
 		_mapService = new MapService();
-		_duelService = new DuelService(_playerManager, _arenaManager, UpdatePlayerClantag);
+		_duelService = new DuelService(_playerManager,_arenaManager,UpdatePlayerClantag);
 		_playerService = new PlayerService(Core, _playerManager, _databaseService);
 		_roundManager = new RoundManager(Core, _playerManager, _arenaManager);
 		_triggerDisciplineService = new TriggerDisciplineService(_playerManager);
@@ -126,13 +127,23 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			Core.Logger.LogInformation("[K4-Arenas] AutoBotFill disabled.");
 		}
 
+		_menuServices = new MenuServices(
+			Core,
+			_playerManager,
+			_arenaManager,
+			_databaseService,
+			_duelService);
+
+		_duelService.SetMenuServices(_menuServices);
+
 		_commandsManager = new CommandsManager(
 			Core,
 			_playerManager,
 			_arenaManager,
 			_databaseService,
 			_duelService,
-			_playerService);
+			_playerService,
+			_menuServices);
 
 		_eventsManager = new EventsManager(
 			Core,
@@ -144,6 +155,8 @@ public sealed partial class Plugin(ISwiftlyCore core) : BasePlugin(core)
 			_playerService,
 			_roundManager,
 			_triggerDisciplineService);
+
+
 
 		Task.Run(async () =>
 		{

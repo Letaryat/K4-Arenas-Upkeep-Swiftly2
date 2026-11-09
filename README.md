@@ -92,6 +92,27 @@ The plugin uses automatic schema management with FluentMigrator. Tables are crea
 - `k4_arenas_weapons` - Player weapon preferences per weapon type
 - `k4_arenas_rounds` - Player round type preferences
 
+### CustomHUD Support
+```
+    "MouseLayouts": {
+      "poor.arenas*": {
+        "File": "menu_skins_mouse.vxml_c",
+        "RowSlots": 16,
+        "ShowAllRows": true,
+        "PageTiles": true,
+        "Panels": { "Back": "nav_back", "Close": "nav_close", "Previous": "", "Next": "" },
+        "Variables": { "PageVar": "" },
+        "Row": { "KeyVar": null, "ThumbPanel": "thumb_{0}", "TypeVar": "option_{0}_type" },
+        "Sidebar": { "Slots": 2, "RootButton": "", "AutoOpen": 0 },
+        "Tabs": {
+          "TabSlots": 8, "TabsPanel": "groups", "TabPrefix": "group_",
+          "TabLabelVar": "group", "TabCountVar": "group_count", "TabAutoOpen": 0
+        }
+      }
+    },
+```
+
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- LICENSE -->

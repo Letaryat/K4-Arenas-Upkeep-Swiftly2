@@ -1,10 +1,7 @@
 using K4ArenaSharedApi;
-using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
-using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace K4Arenas.Managers;
 
@@ -16,6 +13,7 @@ public sealed class CommandsManager
 	private readonly DatabaseService _databaseService;
 	private readonly DuelService _duelService;
 	private readonly PlayerService _playerService;
+	private readonly MenuServices _menuServices;
 
 	public CommandsManager(
 		ISwiftlyCore core,
@@ -23,7 +21,8 @@ public sealed class CommandsManager
 		ArenaManager arenaManager,
 		DatabaseService databaseService,
 		DuelService duelService,
-		PlayerService playerService)
+		PlayerService playerService,
+		MenuServices menuServices)
 	{
 		_core = core;
 		_playerManager = playerManager;
@@ -31,6 +30,7 @@ public sealed class CommandsManager
 		_databaseService = databaseService;
 		_duelService = duelService;
 		_playerService = playerService;
+		_menuServices = menuServices;
 	}
 
 	public void RegisterCommands()
@@ -42,6 +42,7 @@ public sealed class CommandsManager
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelCommands, OnDuelCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelAcceptCommands, OnDuelAcceptCommand);
 		RegisterCommandWithAliases(Config.CurrentValue.Commands.DuelCancelCommands, OnDuelCancelCommand);
+		RegisterCommandWithAliases(["ustawienia"], OnSettingsCommand);
 	}
 
 	private void RegisterCommandWithAliases(List<string> commands, ICommandService.CommandListener handler)
@@ -75,7 +76,7 @@ public sealed class CommandsManager
 			return;
 		}
 
-		ShowWeaponPreferencesMenu(arenaPlayer);
+		_menuServices.ShowWeaponPreferencesMenu(arenaPlayer);
 	}
 
 	private void OnRoundsCommand(ICommandContext ctx)
@@ -95,7 +96,7 @@ public sealed class CommandsManager
 			return;
 		}
 
-		ShowRoundPreferencesMenu(arenaPlayer);
+		_menuServices.ShowRoundPreferencesMenu(arenaPlayer);
 	}
 
 	private void OnQueueCommand(ICommandContext ctx)
@@ -187,6 +188,23 @@ public sealed class CommandsManager
 		_ = _duelService.HandleCommand(ctx) ? 0 : 0;
 	}
 
+    private void OnSettingsCommand(ICommandContext ctx)
+    {
+        var player = ctx.Sender;
+
+        if (player == null || !player.IsValid)
+            return;
+
+        // Pobieramy obiekt ArenaPlayer na podstawie IPlayer.
+        var arenaPlayer = _playerManager.GetPlayer(player);
+
+        if (arenaPlayer == null || !arenaPlayer.IsValid)
+            return;
+
+		_menuServices.CreateSettingsMenu(player, arenaPlayer);
+    }
+
+	/*
 	private void ShowWeaponPreferencesMenu(ArenaPlayer arenaPlayer)
 	{
 		var localizer = _core.Translation.GetPlayerLocalizer(arenaPlayer.Player);
@@ -323,4 +341,7 @@ public sealed class CommandsManager
 		var menu = menuBuilder.Build();
 		_core.MenusAPI.OpenMenuForPlayer(arenaPlayer.Player, menu);
 	}
+	*/
+
+
 }
